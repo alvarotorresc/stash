@@ -280,6 +280,20 @@ describe('POST /api/extract — x', () => {
     expect(await errorOf(res)).toEqual({ status: 502, code: 'UPSTREAM_ERROR' });
   });
 
+  it('should answer 413 when the oembed is too large and the page fails', async () => {
+    const { fetch } = fakeFetch({
+      [X_OEMBED]: () => json('x'.repeat(2000)),
+      [X_PAGE]: () => html('', { status: 403 }),
+    });
+
+    const res = await app({ fetch, limits: { maxJsonBytes: 1000 } })(
+      '/api/extract',
+      postJson({ url: X_POST }),
+    );
+
+    expect(await errorOf(res)).toEqual({ status: 413, code: 'TOO_LARGE' });
+  });
+
   it('should treat a profile as a plain page', async () => {
     const { fetch } = fakeFetch({ 'https://x.com/jack': () => html('<title>jack</title>') });
 
