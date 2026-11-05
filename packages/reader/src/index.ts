@@ -4,3 +4,4 @@ export { detectSource, isShortLink } from './source';
 export { IMAGE_SOURCE_ATTRIBUTE, sanitizeHtml } from './sanitize';
 export { minimalResult } from './result';
 export { parseXOembed } from './x';
+export { parseDocument, parsePage } from './page';
