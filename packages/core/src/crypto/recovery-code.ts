@@ -35,6 +35,7 @@ export async function encodeRecoveryCode(secret: Bytes): Promise<string> {
     }
     buffer &= (1 << bits) - 1;
   }
+  payload.fill(0);
   return (characters.match(new RegExp(`.{${GROUP_LENGTH}}`, 'g')) as string[]).join('-');
 }
 
@@ -53,6 +54,14 @@ export async function parseRecoveryCode(input: string): Promise<Bytes> {
   if (characters.length !== CODE_LENGTH) throw invalidCode();
 
   const payload = new Uint8Array(SECRET_BYTES + 2);
+  try {
+    return await decodePayload(characters, payload);
+  } finally {
+    payload.fill(0);
+  }
+}
+
+async function decodePayload(characters: string, payload: Bytes): Promise<Bytes> {
   let buffer = 0;
   let bits = 0;
   let offset = 0;
@@ -73,6 +82,7 @@ export async function parseRecoveryCode(input: string): Promise<Bytes> {
   const secret = payload.slice(0, SECRET_BYTES);
   const expected = await checksum(secret);
   if (payload[SECRET_BYTES] !== expected[0] || payload[SECRET_BYTES + 1] !== expected[1]) {
+    secret.fill(0);
     throw invalidCode();
   }
   return secret;

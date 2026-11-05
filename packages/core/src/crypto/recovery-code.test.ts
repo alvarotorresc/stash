@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { encodeRecoveryCode, generateRecoveryCode, parseRecoveryCode } from './recovery-code';
 
 const CODE_FORMAT = /^[0-9A-HJKMNP-TV-Z]{4}(-[0-9A-HJKMNP-TV-Z]{4}){6}$/;
@@ -75,5 +75,44 @@ describe('parseRecoveryCode', () => {
     ['empty', ''],
   ])('should throw INVALID_RECOVERY_CODE when the code is %s', async (_, input) => {
     await expect(parseRecoveryCode(input)).rejects.toEqual(invalidCode);
+  });
+});
+
+describe('working buffers', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** Records every 18-byte buffer (secret plus checksum) wiped with zeros. */
+  function watchWipes(): Uint8Array[] {
+    const wiped: Uint8Array[] = [];
+    const fill = Uint8Array.prototype.fill;
+    vi.spyOn(Uint8Array.prototype, 'fill').mockImplementation(function (
+      this: Uint8Array,
+      ...args: Parameters<Uint8Array['fill']>
+    ) {
+      const result = fill.apply(this, args);
+      if (args[0] === 0 && this.length === 18) wiped.push(this);
+      return result;
+    });
+    return wiped;
+  }
+
+  it('should wipe the secret-plus-checksum payload after encoding', async () => {
+    const wiped = watchWipes();
+
+    await encodeRecoveryCode(fixedSecret);
+
+    expect(wiped.length === 1 && wiped[0]?.every((byte) => byte === 0)).toBe(true);
+  });
+
+  it('should wipe the decoded payload after parsing, also when the checksum fails', async () => {
+    const code = await encodeRecoveryCode(fixedSecret);
+    const wiped = watchWipes();
+
+    await parseRecoveryCode(code);
+    await parseRecoveryCode(code.replace(/^./, code[0] === 'A' ? 'B' : 'A')).catch(() => {});
+
+    expect(wiped).toHaveLength(2);
   });
 });
