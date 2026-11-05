@@ -1,0 +1,152 @@
+/*
+ * Stash design tokens (DESIGN.md, section 1).
+ *
+ * The mode follows the system. Light values live on :root; dark values apply
+ * through [data-theme="dark"] (set by the app from matchMedia, or by any
+ * wrapper that needs a fixed mode) and through prefers-color-scheme when no
+ * data-theme is set. The dark block is repeated because CSS cannot share one
+ * declaration block between a selector and a media query.
+ */
+
+:root,
+[data-theme='light'] {
+  color-scheme: light;
+  --bg: #eef0ea;
+  --surface: #fbfcf9;
+  --ink: #16241c;
+  --muted: #4a5850;
+  --line: #d3d9d0;
+  --line-strong: #7a877e;
+  --accent: #1f3b2d;
+  --on-accent: #eef3ec;
+  --accent-text: #2f5541;
+  --accent-soft: #d6e2d6;
+  --amber: #f0b13f;
+  --on-amber: #2a1d00;
+  --amber-soft: #fbe7bd;
+  --on-amber-soft: #3a2900;
+  --danger: #b3261e;
+  --scrim: #7c857f;
+  --t1: #d6e2d6;
+  --t2: #e6e2d3;
+  --t3: #d9dde6;
+  --t4: #ecdcd3;
+  --shadow-sheet: 0 -8px 30px rgb(0 0 0 / 0.18);
+  --shadow-lift: 0 10px 24px -6px rgb(0 0 0 / 0.28);
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #0f1813;
+  --surface: #17231c;
+  --ink: #e7ece6;
+  --muted: #a3b0a7;
+  --line: #2a3a31;
+  --line-strong: #62736a;
+  --accent: #9dcfb0;
+  --on-accent: #0d1f15;
+  --accent-text: #9dcfb0;
+  --accent-soft: #23382b;
+  --amber: #f0b13f;
+  --on-amber: #2a1d00;
+  --amber-soft: #3b2e12;
+  --on-amber-soft: #f6dfa6;
+  --danger: #ffb4ab;
+  --scrim: #26302a;
+  --t1: #24352b;
+  --t2: #33301f;
+  --t3: #262b35;
+  --t4: #3a2a23;
+  --shadow-sheet: 0 -8px 30px rgb(0 0 0 / 0.5);
+  --shadow-lift: 0 10px 24px -6px rgb(0 0 0 / 0.6);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --bg: #0f1813;
+    --surface: #17231c;
+    --ink: #e7ece6;
+    --muted: #a3b0a7;
+    --line: #2a3a31;
+    --line-strong: #62736a;
+    --accent: #9dcfb0;
+    --on-accent: #0d1f15;
+    --accent-text: #9dcfb0;
+    --accent-soft: #23382b;
+    --amber: #f0b13f;
+    --on-amber: #2a1d00;
+    --amber-soft: #3b2e12;
+    --on-amber-soft: #f6dfa6;
+    --danger: #ffb4ab;
+    --scrim: #26302a;
+    --t1: #24352b;
+    --t2: #33301f;
+    --t3: #262b35;
+    --t4: #3a2a23;
+    --shadow-sheet: 0 -8px 30px rgb(0 0 0 / 0.5);
+    --shadow-lift: 0 10px 24px -6px rgb(0 0 0 / 0.6);
+  }
+}
+
+:root {
+  /* Typography: Public Sans; monospace only for the recovery code. */
+  --font-sans: 'Public Sans', system-ui, sans-serif;
+  --font-mono: ui-monospace, 'Cascadia Mono', 'Roboto Mono', monospace;
+  --fs-display: 28px;
+  --fs-read-title: 26px;
+  --fs-read: 18px;
+  --fs-word: 18px;
+  --fs-input: 16px;
+  --fs-button: 16px;
+  --fs-title: 15.5px;
+  --fs-group: 15px;
+  --fs-label: 14px;
+  --fs-help: 14px;
+  --fs-meta: 13.5px;
+  --fs-tab: 12.5px;
+
+  /* Spacing: 4 px base. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* Radii with roles: chips, controls, blocks, sheet. */
+  --radius-chip: 6px;
+  --radius-control: 8px;
+  --radius-block: 10px;
+  --radius-sheet: 18px;
+
+  /* Touch target. */
+  --target: 44px;
+
+  /* Motion. */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --dur-press: 120ms;
+  --dur-sheet-in: 280ms;
+  --dur-sheet-out: 200ms;
+  --dur-toast: 200ms;
+  --dur-fade: 160ms;
+  --dur-collapse: 200ms;
+  --dur-lift: 150ms;
+  --press-scale: 0.97;
+  --lift-scale: 1.02;
+}
+
+/* Reduced motion: no movement or scaling; only 150 ms opacity fades remain. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --press-scale: 1;
+    --lift-scale: 1;
+    --dur-sheet-in: 150ms;
+    --dur-sheet-out: 150ms;
+    --dur-toast: 150ms;
+    --dur-fade: 150ms;
+    --dur-collapse: 0ms;
+  }
+}

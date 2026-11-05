@@ -1,0 +1,29 @@
+/*
+ * Public Sans (SIL Open Font License 1.1, see ../fonts/OFL.txt), self-hosted:
+ * no third party sees the app's traffic. Latin subset from
+ * @fontsource/public-sans 5.3.0; it covers Spanish (á, ñ, ¿, «, »).
+ */
+
+@font-face {
+  font-family: 'Public Sans';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../fonts/public-sans-latin-400-normal.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Public Sans';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('../fonts/public-sans-latin-600-normal.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Public Sans';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('../fonts/public-sans-latin-700-normal.woff2') format('woff2');
+}
