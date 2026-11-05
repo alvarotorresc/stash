@@ -9,13 +9,15 @@
   },
   "scripts": {
     "typecheck": "tsc",
-    "test": "vitest run --coverage"
+    "test": "vitest run --coverage",
+    "bench": "vite bench --host"
   },
   "devDependencies": {
     "@noble/hashes": "2.4.0",
     "@vitest/coverage-v8": "5.1.0",
     "fake-indexeddb": "6.2.7",
     "typescript": "6.0.3",
+    "vite": "8.3.5",
     "vitest": "5.1.0"
   },
   "dependencies": {
