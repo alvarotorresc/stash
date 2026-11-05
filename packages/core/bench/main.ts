@@ -1,12 +1,14 @@
 /**
  * Argon2id benchmark for the phone (plan F1: under about 2 s on a modest Android).
  *
- * Run `pnpm --filter @stash/core bench` on the computer, then open the page on the phone:
+ * Run `pnpm --filter @stash/core bench` on the computer; the server only listens on localhost.
+ * Then open the page on the phone:
  *
- * - Same network: http://<computer-ip>:5173. It only needs WebAssembly and
- *   crypto.getRandomValues, which also work on plain http.
- * - USB: `adb reverse tcp:5173 tcp:5173` and open http://localhost:5173 in Chrome on the phone.
- *   chrome://inspect on the computer shows its console.
+ * - USB (default): `adb reverse tcp:5173 tcp:5173` and open http://localhost:5173 in Chrome on
+ *   the phone. chrome://inspect on the computer shows its console.
+ * - Same network, on purpose and only while measuring: `pnpm --filter @stash/core bench --host`
+ *   exposes the dev server, which can read workspace files, to the whole LAN. Open
+ *   http://<computer-ip>:5173 and stop the server when done.
  */
 import { derivePasswordKeysInWorker } from '../src/crypto/argon2-client';
 import { DEFAULT_KDF_PARAMS, SALT_BYTES } from '../src/crypto/kdf';

@@ -53,16 +53,19 @@ None yet. See `.env.example`.
 | `pnpm --filter @stash/pwa dev`       | PWA dev server                                                    |
 | `pnpm --filter @stash/extension dev` | Extension in development mode (Chrome)                            |
 | `pnpm --filter @stash/api dev`       | Worker running locally                                            |
-| `pnpm --filter @stash/core bench`    | Argon2id benchmark page, reachable from a phone (see below)       |
+| `pnpm --filter @stash/core bench`    | Argon2id benchmark page on localhost (see below)                  |
 
 ### Argon2id benchmark on a phone
 
 `pnpm --filter @stash/core bench` serves a page that times Argon2id with the production
-parameters. Open it on the phone and press **Run**:
+parameters, in the same disposable worker the apps use. The server only listens on localhost.
+Open it on the phone and press **Run**:
 
-- Same Wi-Fi: `http://<computer-ip>:5173`.
-- USB: run `adb reverse tcp:5173 tcp:5173`, then open `http://localhost:5173` in Chrome on the
-  phone. `chrome://inspect` on the computer shows its console.
+- USB (default): run `adb reverse tcp:5173 tcp:5173`, then open `http://localhost:5173` in
+  Chrome on the phone. `chrome://inspect` on the computer shows its console.
+- Same Wi-Fi, on purpose: `pnpm --filter @stash/core bench --host` exposes the Vite dev server,
+  which can read files in the workspace, to everyone on the network. Use it only on a trusted
+  network, open `http://<computer-ip>:5173` and stop the server as soon as you are done.
 
 ## Contributing
 

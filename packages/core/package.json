@@ -10,7 +10,7 @@
   "scripts": {
     "typecheck": "tsc",
     "test": "vitest run --coverage",
-    "bench": "vite bench --host"
+    "bench": "vite bench"
   },
   "devDependencies": {
     "@noble/hashes": "2.4.0",
