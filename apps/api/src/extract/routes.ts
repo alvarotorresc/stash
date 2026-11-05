@@ -1,5 +1,5 @@
 /**
- * `POST /api/extract` and `POST /api/extract/image` (D10, D35, D36).
+ * `POST /api/extract` and `POST /api/extract/image`.
  *
  * The proxy downloads and forgets: nothing is stored and the URL is never logged nor echoed, not
  * even in errors. The URL travels in the JSON body, never in the query string.

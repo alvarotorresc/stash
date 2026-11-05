@@ -1,5 +1,5 @@
 /**
- * Source adapters: what to download for each kind of link (D20, D35, D36). They only download;
+ * Source adapters: what to download for each kind of link. They only download;
  * parsing happens on the device. No third-party service ever sees the URL.
  */
 
@@ -80,7 +80,7 @@ export function hostIs(url: URL, domain: string): boolean {
   return host === domain || host.endsWith(`.${domain}`);
 }
 
-// --- Reddit (D20, D36): the Atom feed of the post, with its full text. ---
+// --- Reddit: the Atom feed of the post, with its full text. ---
 
 const REDDIT_POST = /^\/((?:r|u|user)\/[^/]+\/)?comments\/([a-z0-9]+)(?:\/|$)/i;
 const REDDIT_SHARE = /^\/r\/[^/]+\/s\/[^/]+/i;
@@ -113,7 +113,7 @@ async function extractReddit(url: URL, ctx: SourceContext): Promise<ExtractData>
   return { kind: 'reddit', feed: await fetchDocument(feedUrl, FEED, ctx) };
 }
 
-// --- X (D36): official oEmbed + the meta tags of the post page. ---
+// --- X: official oEmbed + the meta tags of the post page. ---
 
 const X_STATUS = /^\/([a-z0-9_]{1,15})\/status(?:es)?\/(\d{1,25})(?:\/|$)/i;
 
@@ -146,7 +146,7 @@ async function extractX(status: { user: string; id: string }, ctx: SourceContext
   return result;
 }
 
-// --- Instagram (D36): preview from meta tags only; never the embed page. ---
+// --- Instagram: preview from meta tags only; never the embed page. ---
 
 export function isInstagramUrl(url: URL): boolean {
   return hostIs(url, 'instagram.com') || hostIs(url, 'instagr.am');
@@ -159,7 +159,7 @@ async function extractInstagram(url: URL, ctx: SourceContext): Promise<ExtractDa
     const landedOnLogin = new URL(page.url).pathname.startsWith('/accounts/login');
     return { kind: 'instagram', page: landedOnLogin ? null : page };
   } catch (error) {
-    // Instagram usually blocks requests from datacenters: the client keeps the plain link (D30).
+    // Instagram usually blocks requests from datacenters: the client keeps the plain link.
     if (error instanceof UpstreamError && error.code !== 'URL_NOT_ALLOWED') {
       return { kind: 'instagram', page: null };
     }

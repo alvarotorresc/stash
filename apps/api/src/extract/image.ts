@@ -1,5 +1,5 @@
 /**
- * Preview image download, so the device can build the encrypted thumbnail (D12). Instagram image
+ * Preview image download, so the device can build the encrypted thumbnail. Instagram image
  * URLs expire, so the image has to be downloaded at save time instead of keeping its URL.
  */
 
