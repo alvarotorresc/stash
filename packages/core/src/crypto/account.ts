@@ -1,16 +1,9 @@
 import { openKey, sealKey } from './aead';
+import { derivePasswordKeysInWorker } from './argon2-client';
 import { fromBase64Url, randomBytes, toBase64Url, utf8, type Bytes } from './bytes';
 import { CryptoError } from './errors';
-import {
-  DEFAULT_KDF_PARAMS,
-  SALT_BYTES,
-  argon2id,
-  assertKdfParams,
-  deriveAesKey,
-  deriveBits,
-  importKeyMaterial,
-  type KdfParams,
-} from './kdf';
+import { DEFAULT_KDF_PARAMS, SALT_BYTES, assertKdfParams, type KdfParams } from './kdf';
+import { INFO, splitKeyMaterial, type SplitKeys } from './key-chain';
 import { assertNewPassword } from './password-policy';
 import type { DataKey } from './records';
 import { generateRecoveryCode, parseRecoveryCode } from './recovery-code';
@@ -25,20 +18,10 @@ import { generateRecoveryCode, parseRecoveryCode } from './recovery-code';
  * Changing the password or recovering re-wraps the data key; no data is re-encrypted.
  * The password is normalised to NFC, so every keyboard yields the same bytes.
  */
-const INFO = {
-  loginKey: 'stash/v1/login-key',
-  passwordKek: 'stash/v1/password-kek',
-  recoveryAuthKey: 'stash/v1/recovery-auth-key',
-  recoveryKek: 'stash/v1/recovery-kek',
-} as const;
-
 const WRAP_CONTEXT = {
   password: 'data-key:password',
   recovery: 'data-key:recovery',
 } as const;
-
-const SENT_KEY_BYTES = 32;
-const KEK_USAGES: KeyUsage[] = ['wrapKey', 'unwrapKey'];
 
 /** What the server stores for the password. */
 export interface PasswordSetup {
@@ -73,21 +56,6 @@ export interface RecoveryCredentials {
   readonly recoveryAuthKey: string;
 }
 
-interface SplitKeys {
-  sentKey: string;
-  kek: CryptoKey;
-}
-
-async function splitKeyMaterial(ikm: Bytes, sentInfo: string, kekInfo: string): Promise<SplitKeys> {
-  const base = await importKeyMaterial(ikm);
-  ikm.fill(0);
-  const [sentKey, kek] = await Promise.all([
-    deriveBits(base, sentInfo, SENT_KEY_BYTES),
-    deriveAesKey(base, kekInfo, KEK_USAGES),
-  ]);
-  return { sentKey: toBase64Url(sentKey), kek };
-}
-
 async function derivePasswordKeys(
   password: string,
   salt: Bytes,
@@ -96,8 +64,8 @@ async function derivePasswordKeys(
   if (password.length === 0) {
     throw new CryptoError('INVALID_INPUT', 'Password is required');
   }
-  const masterKey = await argon2id(utf8(password.normalize('NFC')), salt, params);
-  return splitKeyMaterial(masterKey, INFO.loginKey, INFO.passwordKek);
+  // Argon2id runs in a disposable worker; the master key never reaches this thread.
+  return derivePasswordKeysInWorker({ password: utf8(password.normalize('NFC')), salt, params });
 }
 
 function decodeSalt(salt: string): Bytes {

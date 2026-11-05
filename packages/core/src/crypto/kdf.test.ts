@@ -1,5 +1,6 @@
 import { argon2id as referenceArgon2id } from '@noble/hashes/argon2.js';
-import { describe, expect, it } from 'vitest';
+import sodium from 'libsodium-wrappers-sumo';
+import { beforeAll, describe, expect, it } from 'vitest';
 import {
   DEFAULT_KDF_PARAMS,
   MAX_KDF_PARAMS,
@@ -26,6 +27,10 @@ function smallParams(memoryKiB: number, iterations: number): KdfParams {
 }
 
 describe('argon2id', () => {
+  beforeAll(async () => {
+    await sodium.ready;
+  });
+
   it('should be checked against a reference that passes the RFC 9106 test vector', () => {
     // RFC 9106 §5.3. libsodium only runs p = 1 without secret or associated data, so this
     // vector anchors the reference implementation that the next tests compare against.
@@ -51,7 +56,7 @@ describe('argon2id', () => {
       const salt = new Uint8Array(16).map((_, index) => index);
       const encoded = new TextEncoder().encode(password);
 
-      const derived = await argon2id(encoded, salt, smallParams(memoryKiB, iterations));
+      const derived = argon2id(sodium, encoded, salt, smallParams(memoryKiB, iterations));
 
       expect(toHex(derived)).toBe(
         toHex(referenceArgon2id(encoded, salt, { t: iterations, m: memoryKiB, p: 1, dkLen: 32 })),
@@ -63,11 +68,24 @@ describe('argon2id', () => {
     const salt = new Uint8Array(16).fill(0xa5);
     const encoded = new TextEncoder().encode('production parameters');
 
-    const derived = await argon2id(encoded, salt, DEFAULT_KDF_PARAMS);
+    const derived = argon2id(sodium, encoded, salt, DEFAULT_KDF_PARAMS);
 
     expect(toHex(derived)).toBe(
       toHex(referenceArgon2id(encoded, salt, { t: 3, m: 65536, p: 1, dkLen: 32 })),
     );
+  });
+
+  it('should throw KDF_FAILED when libsodium fails, as when memory runs out', () => {
+    const failing = {
+      ...sodium,
+      crypto_pwhash: () => {
+        throw new Error('Cannot enlarge memory');
+      },
+    };
+
+    expect(() =>
+      argon2id(failing, new Uint8Array(4), new Uint8Array(16), DEFAULT_KDF_PARAMS),
+    ).toThrow(expect.objectContaining({ code: 'KDF_FAILED' }));
   });
 });
 

@@ -8,7 +8,8 @@
  * - USB: `adb reverse tcp:5173 tcp:5173` and open http://localhost:5173 in Chrome on the phone.
  *   chrome://inspect on the computer shows its console.
  */
-import { DEFAULT_KDF_PARAMS, SALT_BYTES, argon2id } from '../src/crypto/kdf';
+import { derivePasswordKeysInWorker } from '../src/crypto/argon2-client';
+import { DEFAULT_KDF_PARAMS, SALT_BYTES } from '../src/crypto/kdf';
 
 const RUNS = 5;
 const output = document.querySelector('#output') as HTMLPreElement;
@@ -25,16 +26,17 @@ async function run(): Promise<void> {
   log(`m = ${memoryKiB / 1024} MiB, t = ${iterations}, p = ${parallelism}`);
   log(navigator.userAgent);
 
-  const password = new TextEncoder().encode('benchmark password');
   const salt = crypto.getRandomValues(new Uint8Array(SALT_BYTES));
   const timings: number[] = [];
-  // The first run also loads and compiles the WebAssembly module.
+  // Each run starts a fresh worker, as a real login does, so the timings include loading and
+  // compiling the WebAssembly module. The first run also fills the HTTP cache.
   for (let index = 0; index <= RUNS; index++) {
+    const password = new TextEncoder().encode('benchmark password');
     const start = performance.now();
-    await argon2id(password, salt, DEFAULT_KDF_PARAMS);
+    await derivePasswordKeysInWorker({ password, salt, params: DEFAULT_KDF_PARAMS });
     const elapsed = performance.now() - start;
     if (index === 0) {
-      log(`warm-up (includes loading): ${elapsed.toFixed(0)} ms`);
+      log(`warm-up (fills the cache): ${elapsed.toFixed(0)} ms`);
     } else {
       timings.push(elapsed);
       log(`run ${index}: ${elapsed.toFixed(0)} ms`);

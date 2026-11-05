@@ -78,30 +78,30 @@ export function needsKdfUpgrade(
   return params.memoryKiB < defaults.memoryKiB || params.iterations < defaults.iterations;
 }
 
-let sodiumReady: Promise<typeof sodiumType> | undefined;
+export type Sodium = typeof sodiumType;
 
-// Loaded on demand so the WebAssembly bundle stays out of the initial chunk.
-function loadSodium(): Promise<typeof sodiumType> {
-  sodiumReady ??= import('libsodium-wrappers-sumo').then(async ({ default: sodium }) => {
-    await sodium.ready;
-    return sodium;
-  });
-  return sodiumReady;
-}
-
-/** Runs Argon2id without validating the parameters; callers validate at the boundary. */
-export async function argon2id(password: Bytes, salt: Bytes, params: KdfParams): Promise<Bytes> {
-  const sodium = await loadSodium();
-  const output = sodium.crypto_pwhash(
-    MASTER_KEY_BYTES,
-    password,
-    salt,
-    params.iterations,
-    params.memoryKiB * 1024,
-    sodium.crypto_pwhash_ALG_ARGON2ID13,
-  );
+/**
+ * Runs Argon2id without validating the parameters; callers validate at the boundary. Only the
+ * Argon2id worker calls it: libsodium frees its output buffer without wiping it, so the master
+ * key stays in the WebAssembly heap until the worker is terminated.
+ */
+export function argon2id(sodium: Sodium, password: Bytes, salt: Bytes, params: KdfParams): Bytes {
+  let output: Uint8Array;
+  try {
+    output = sodium.crypto_pwhash(
+      MASTER_KEY_BYTES,
+      password,
+      salt,
+      params.iterations,
+      params.memoryKiB * 1024,
+      sodium.crypto_pwhash_ALG_ARGON2ID13,
+    );
+  } catch {
+    // Typically the WebAssembly heap could not grow to the requested memory.
+    throw new CryptoError('KDF_FAILED', 'Argon2id failed');
+  }
   const copy = new Uint8Array(output);
-  sodium.memzero(output);
+  output.fill(0);
   return copy;
 }
 
