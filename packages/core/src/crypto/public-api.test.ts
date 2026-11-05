@@ -25,10 +25,11 @@ async function everyPublicResult(): Promise<unknown[]> {
     ...account.server,
   });
   const unlocked = await credentials.unlockDataKey(account.server.wrappedDataKey);
-  const changed = await core.changePassword(credentials, {
+  const changed = await core.changePassword({
     email: EMAIL,
-    wrappedDataKey: account.server.wrappedDataKey,
+    currentPassword: PASSWORD,
     newPassword: 'new password',
+    ...account.server,
   });
   const recovery = await core.deriveRecoveryCredentials(account.recoveryCode);
   const recovered = await core.recoverAccount(recovery, {

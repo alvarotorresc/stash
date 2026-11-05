@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  type AccountKeys,
   changePassword,
   createAccountKeys,
   derivePasswordCredentials,
@@ -219,6 +220,16 @@ describe('PasswordCredentials.unlockDataKey', () => {
     });
   });
 
+  it('should be single use', async () => {
+    const { account } = await registerWithData();
+    const credentials = await login(PASSWORD, account.server);
+    await credentials.unlockDataKey(account.server.wrappedDataKey);
+
+    await expect(credentials.unlockDataKey(account.server.wrappedDataKey)).rejects.toMatchObject({
+      code: 'CREDENTIALS_USED',
+    });
+  });
+
   it('should not open the recovery-wrapped copy', async () => {
     const { account } = await registerWithData();
     const credentials = await login(PASSWORD, account.server);
@@ -229,44 +240,52 @@ describe('PasswordCredentials.unlockDataKey', () => {
   });
 });
 
+function change(
+  account: AccountKeys,
+  overrides: Partial<Parameters<typeof changePassword>[0]> = {},
+) {
+  return changePassword({
+    email: EMAIL,
+    currentPassword: PASSWORD,
+    newPassword: NEW_PASSWORD,
+    salt: account.server.salt,
+    kdf: account.server.kdf,
+    wrappedDataKey: account.server.wrappedDataKey,
+    ...overrides,
+  });
+}
+
 describe('changePassword', () => {
   it('should keep the data readable with the new password', async () => {
     const { account, blob } = await registerWithData();
-    const current = await login(PASSWORD, account.server);
 
-    const { server } = await changePassword(current, {
-      email: EMAIL,
-      wrappedDataKey: account.server.wrappedDataKey,
-      newPassword: NEW_PASSWORD,
-    });
+    const { server } = await change(account);
     const next = await login(NEW_PASSWORD, server);
     const dataKey = await next.unlockDataKey(server.wrappedDataKey);
 
     expect(await decryptRecord(dataKey, RECORD_ID, blob)).toEqual(plaintext);
   });
 
+  it('should return the current login key so the server can authorise the change', async () => {
+    const { account } = await registerWithData();
+
+    const { currentLoginKey } = await change(account);
+
+    expect(currentLoginKey).toBe(account.server.loginKey);
+  });
+
   it('should return a data key that still decrypts existing data', async () => {
     const { account, blob } = await registerWithData();
-    const current = await login(PASSWORD, account.server);
 
-    const { dataKey } = await changePassword(current, {
-      email: EMAIL,
-      wrappedDataKey: account.server.wrappedDataKey,
-      newPassword: NEW_PASSWORD,
-    });
+    const { dataKey } = await change(account);
 
     expect(await decryptRecord(dataKey, RECORD_ID, blob)).toEqual(plaintext);
   });
 
   it('should use a new salt and login key', async () => {
     const { account } = await registerWithData();
-    const current = await login(PASSWORD, account.server);
 
-    const { server } = await changePassword(current, {
-      email: EMAIL,
-      wrappedDataKey: account.server.wrappedDataKey,
-      newPassword: NEW_PASSWORD,
-    });
+    const { server } = await change(account);
 
     expect({
       salt: server.salt === account.server.salt,
@@ -276,12 +295,7 @@ describe('changePassword', () => {
 
   it('should stop the old password from opening the new wrapped key', async () => {
     const { account } = await registerWithData();
-    const current = await login(PASSWORD, account.server);
-    const { server } = await changePassword(current, {
-      email: EMAIL,
-      wrappedDataKey: account.server.wrappedDataKey,
-      newPassword: NEW_PASSWORD,
-    });
+    const { server } = await change(account);
 
     const old = await login(PASSWORD, server);
 
@@ -292,12 +306,7 @@ describe('changePassword', () => {
 
   it('should keep the recovery code working', async () => {
     const { account, blob } = await registerWithData();
-    const current = await login(PASSWORD, account.server);
-    await changePassword(current, {
-      email: EMAIL,
-      wrappedDataKey: account.server.wrappedDataKey,
-      newPassword: NEW_PASSWORD,
-    });
+    await change(account);
     const recovery = await deriveRecoveryCredentials(account.recoveryCode);
 
     const recovered = await recoverAccount(recovery, {
@@ -311,41 +320,46 @@ describe('changePassword', () => {
 
   it('should fail when the current password is wrong', async () => {
     const { account } = await registerWithData();
-    const wrong = await login('wrong password', account.server);
 
-    await expect(
-      changePassword(wrong, {
-        email: EMAIL,
-        wrappedDataKey: account.server.wrappedDataKey,
-        newPassword: NEW_PASSWORD,
-      }),
-    ).rejects.toMatchObject({ code: 'DECRYPTION_FAILED' });
+    await expect(change(account, { currentPassword: 'wrong password' })).rejects.toMatchObject({
+      code: 'DECRYPTION_FAILED',
+    });
+  });
+
+  it('should not apply the length rule to the current password', async () => {
+    const { account } = await registerWithData();
+
+    await expect(change(account, { currentPassword: 'short' })).rejects.toMatchObject({
+      code: 'DECRYPTION_FAILED',
+    });
   });
 
   it('should throw PASSWORD_TOO_SHORT when the new password is too short', async () => {
     const { account } = await registerWithData();
-    const current = await login(PASSWORD, account.server);
 
-    await expect(
-      changePassword(current, {
-        email: EMAIL,
-        wrappedDataKey: account.server.wrappedDataKey,
-        newPassword: 'too short',
-      }),
-    ).rejects.toMatchObject({ code: 'PASSWORD_TOO_SHORT' });
+    await expect(change(account, { newPassword: 'too short' })).rejects.toMatchObject({
+      code: 'PASSWORD_TOO_SHORT',
+    });
   });
 
-  it('should reject credentials that core did not create', async () => {
+  it('should reject parameters below the floor', async () => {
     const { account } = await registerWithData();
-    const forged = { loginKey: account.server.loginKey, unlockDataKey: vi.fn() };
 
     await expect(
-      changePassword(forged, {
-        email: EMAIL,
-        wrappedDataKey: account.server.wrappedDataKey,
-        newPassword: NEW_PASSWORD,
-      }),
-    ).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+      change(account, { kdf: { ...DEFAULT_KDF_PARAMS, memoryKiB: 8 } }),
+    ).rejects.toMatchObject({ code: 'INVALID_KDF_PARAMS' });
+  });
+
+  it('should leave a login handle no way to re-wrap the data key', async () => {
+    // A handle left alive after login must not let a script re-wrap the data key under a
+    // password it chooses, which would reveal the raw data key.
+    const { account } = await registerWithData();
+    const handle = await login(PASSWORD, account.server);
+
+    expect({
+      own: Object.keys(handle),
+      methods: Object.getOwnPropertyNames(Object.getPrototypeOf(handle)).sort(),
+    }).toEqual({ own: ['loginKey'], methods: ['constructor', 'unlockDataKey'] });
   });
 });
 
@@ -403,20 +417,48 @@ describe('recoverAccount', () => {
 
   it('should stop the old code from opening the new recovery-wrapped key', async () => {
     const { account } = await registerWithData();
-    const oldRecovery = await deriveRecoveryCredentials(account.recoveryCode);
-    const recovered = await recoverAccount(oldRecovery, {
+    const recovered = await recoverAccount(await deriveRecoveryCredentials(account.recoveryCode), {
       email: EMAIL,
       recoveryWrappedDataKey: account.server.recoveryWrappedDataKey,
       newPassword: NEW_PASSWORD,
     });
 
     await expect(
-      recoverAccount(oldRecovery, {
+      recoverAccount(await deriveRecoveryCredentials(account.recoveryCode), {
         email: EMAIL,
         recoveryWrappedDataKey: recovered.server.recoveryWrappedDataKey,
         newPassword: 'third password',
       }),
     ).rejects.toMatchObject({ code: 'INVALID_RECOVERY_CODE' });
+  });
+
+  it('should be single use', async () => {
+    const { account } = await registerWithData();
+    const recovery = await deriveRecoveryCredentials(account.recoveryCode);
+    const options = {
+      email: EMAIL,
+      recoveryWrappedDataKey: account.server.recoveryWrappedDataKey,
+      newPassword: NEW_PASSWORD,
+    };
+    await recoverAccount(recovery, options);
+
+    await expect(recoverAccount(recovery, options)).rejects.toMatchObject({
+      code: 'CREDENTIALS_USED',
+    });
+  });
+
+  it('should keep the credentials usable when the new password is rejected', async () => {
+    const { account } = await registerWithData();
+    const recovery = await deriveRecoveryCredentials(account.recoveryCode);
+    const options = {
+      email: EMAIL,
+      recoveryWrappedDataKey: account.server.recoveryWrappedDataKey,
+    };
+    await expect(recoverAccount(recovery, { ...options, newPassword: 'short' })).rejects.toThrow();
+
+    await expect(
+      recoverAccount(recovery, { ...options, newPassword: NEW_PASSWORD }),
+    ).resolves.toBeTruthy();
   });
 
   it('should throw PASSWORD_TOO_SHORT when the new password is too short', async () => {

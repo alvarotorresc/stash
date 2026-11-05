@@ -52,12 +52,14 @@ export interface AccountKeys {
   readonly dataKey: DataKey;
 }
 
+/** Single use: `unlockDataKey` works once. Do not keep it in long-lived state. */
 export interface PasswordCredentials {
   /** Sent to the server to log in. */
   readonly loginKey: string;
   unlockDataKey(wrappedDataKey: string): Promise<DataKey>;
 }
 
+/** Single use: `recoverAccount` consumes it. */
 export interface RecoveryCredentials {
   /** Sent to the server to start a recovery. */
   readonly recoveryAuthKey: string;
@@ -94,8 +96,13 @@ async function unwrap(
   return openKey(kek, fromBase64Url(wrapped), context, extractable);
 }
 
+function credentialsUsed(): CryptoError {
+  return new CryptoError('CREDENTIALS_USED', 'Credentials can only be used once');
+}
+
+/** Holds the KEK privately and hands it out once. */
 class PasswordCredentialsHandle implements PasswordCredentials {
-  readonly #kek: CryptoKey;
+  #kek: CryptoKey | null;
 
   constructor(
     readonly loginKey: string,
@@ -105,19 +112,15 @@ class PasswordCredentialsHandle implements PasswordCredentials {
   }
 
   async unlockDataKey(wrappedDataKey: string): Promise<DataKey> {
-    return (await unwrap(this.#kek, wrappedDataKey, WRAP_CONTEXT.password, false)) as DataKey;
-  }
-
-  static kekOf(credentials: PasswordCredentials): CryptoKey {
-    if (!(credentials instanceof PasswordCredentialsHandle)) {
-      throw new CryptoError('INVALID_INPUT', 'Unknown credentials');
-    }
-    return credentials.#kek;
+    const kek = this.#kek;
+    if (kek === null) throw credentialsUsed();
+    this.#kek = null;
+    return (await unwrap(kek, wrappedDataKey, WRAP_CONTEXT.password, false)) as DataKey;
   }
 }
 
 class RecoveryCredentialsHandle implements RecoveryCredentials {
-  readonly #kek: CryptoKey;
+  #kek: CryptoKey | null;
 
   constructor(
     readonly recoveryAuthKey: string,
@@ -126,11 +129,14 @@ class RecoveryCredentialsHandle implements RecoveryCredentials {
     this.#kek = kek;
   }
 
-  static kekOf(credentials: RecoveryCredentials): CryptoKey {
+  static takeKek(credentials: RecoveryCredentials): CryptoKey {
     if (!(credentials instanceof RecoveryCredentialsHandle)) {
       throw new CryptoError('INVALID_INPUT', 'Unknown credentials');
     }
-    return credentials.#kek;
+    const kek = credentials.#kek;
+    if (kek === null) throw credentialsUsed();
+    credentials.#kek = null;
+    return kek;
   }
 }
 
@@ -218,22 +224,33 @@ export async function derivePasswordCredentials({
 }
 
 /**
- * Password change: re-wraps the data key under the new password with a new salt and the
- * current default parameters. The recovery code keeps working.
+ * Password change: proves the current password by deriving its keys and opening the data key,
+ * then re-wraps the data key under the new password with a new salt and the default
+ * parameters. It takes the current password rather than login credentials, so nothing left
+ * alive after a login can re-wrap the data key under a password of someone else's choosing.
+ * The server authorises the change with `currentLoginKey`. The recovery code keeps working.
  */
-export async function changePassword(
-  current: PasswordCredentials,
-  {
-    email,
-    wrappedDataKey,
-    newPassword,
-  }: { email: string; wrappedDataKey: string; newPassword: string },
-): Promise<{ server: PasswordSetup; dataKey: DataKey }> {
+export async function changePassword({
+  email,
+  currentPassword,
+  newPassword,
+  salt,
+  kdf,
+  wrappedDataKey,
+}: {
+  email: string;
+  currentPassword: string;
+  newPassword: string;
+  salt: string;
+  kdf: unknown;
+  wrappedDataKey: string;
+}): Promise<{ currentLoginKey: string; server: PasswordSetup; dataKey: DataKey }> {
   assertNewPassword(newPassword);
-  const kek = PasswordCredentialsHandle.kekOf(current);
-  const extractableDataKey = await unwrap(kek, wrappedDataKey, WRAP_CONTEXT.password, true);
+  assertKdfParams(kdf);
+  const current = await derivePasswordKeys(email, currentPassword, decodeSalt(salt), kdf);
+  const extractableDataKey = await unwrap(current.kek, wrappedDataKey, WRAP_CONTEXT.password, true);
   const { setup, dataKey } = await setUpPassword(email, newPassword, extractableDataKey);
-  return { server: setup, dataKey };
+  return { currentLoginKey: current.sentKey, server: setup, dataKey };
 }
 
 /** First step of a recovery: parses the code and derives the auth key to send. */
@@ -256,7 +273,8 @@ export async function recoverAccount(
   }: { email: string; recoveryWrappedDataKey: string; newPassword: string },
 ): Promise<AccountKeys> {
   assertNewPassword(newPassword);
-  const kek = RecoveryCredentialsHandle.kekOf(recovery);
+  normalizeEmail(email);
+  const kek = RecoveryCredentialsHandle.takeKek(recovery);
   let extractableDataKey: CryptoKey;
   try {
     extractableDataKey = await unwrap(kek, recoveryWrappedDataKey, WRAP_CONTEXT.recovery, true);

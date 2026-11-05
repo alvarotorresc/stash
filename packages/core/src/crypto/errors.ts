@@ -1,4 +1,5 @@
 /**
+ * - `CREDENTIALS_USED`: password or recovery credentials are single use; derive them again.
  * - `DECRYPTION_FAILED`: wrong key, tampered data or unknown format. The causes are
  *   deliberately not told apart.
  * - `INVALID_INPUT`: malformed input, such as bad base64url or an empty password.
@@ -8,6 +9,7 @@
  * - `PASSWORD_TOO_SHORT`: a new password under `MIN_PASSWORD_LENGTH` characters.
  */
 export type CryptoErrorCode =
+  | 'CREDENTIALS_USED'
   | 'DECRYPTION_FAILED'
   | 'INVALID_INPUT'
   | 'INVALID_KDF_PARAMS'
