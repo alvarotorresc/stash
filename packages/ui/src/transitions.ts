@@ -31,3 +31,21 @@ export function rowExit(
     },
   };
 }
+
+/**
+ * Undo toast: enters and leaves from below in 200 ms (same side both ways).
+ * With reduced motion, a 150 ms fade.
+ */
+export function toastMotion(
+  _node: HTMLElement,
+  { reduced = prefersReducedMotion.current }: { reduced?: boolean } = {},
+): TransitionConfig {
+  if (reduced) {
+    return { duration: REDUCED_FADE, css: (t) => `opacity: ${t}` };
+  }
+  return {
+    duration: 200,
+    easing: quintOut,
+    css: (t, u) => `opacity: ${t}; transform: translateY(${u * 100}%)`,
+  };
+}
