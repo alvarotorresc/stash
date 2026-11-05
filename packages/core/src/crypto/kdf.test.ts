@@ -2,11 +2,14 @@ import { argon2id as referenceArgon2id } from '@noble/hashes/argon2.js';
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_KDF_PARAMS,
+  MAX_KDF_PARAMS,
+  MIN_KDF_PARAMS,
   argon2id,
   assertKdfParams,
   deriveAesKey,
   deriveBits,
   importKeyMaterial,
+  needsKdfUpgrade,
   type KdfParams,
 } from './kdf';
 
@@ -79,9 +82,49 @@ describe('DEFAULT_KDF_PARAMS', () => {
   });
 });
 
+describe('MIN_KDF_PARAMS', () => {
+  it('should be set on its own, not taken from the defaults', () => {
+    expect(MIN_KDF_PARAMS).not.toBe(DEFAULT_KDF_PARAMS);
+  });
+
+  it('should never be above the defaults', () => {
+    expect(
+      MIN_KDF_PARAMS.memoryKiB <= DEFAULT_KDF_PARAMS.memoryKiB &&
+        MIN_KDF_PARAMS.iterations <= DEFAULT_KDF_PARAMS.iterations,
+    ).toBe(true);
+  });
+
+  it('should never go below the OWASP minimum of m = 19 MiB, t = 2', () => {
+    expect(MIN_KDF_PARAMS.memoryKiB >= 19 * 1024 && MIN_KDF_PARAMS.iterations >= 2).toBe(true);
+  });
+
+  it('should be m = 64 MiB, t = 3 for now', () => {
+    expect({ memoryKiB: MIN_KDF_PARAMS.memoryKiB, iterations: MIN_KDF_PARAMS.iterations }).toEqual({
+      memoryKiB: 65536,
+      iterations: 3,
+    });
+  });
+});
+
+describe('MAX_KDF_PARAMS', () => {
+  it('should cap the cost at m = 256 MiB, t = 10 so a hostile server cannot freeze a phone', () => {
+    expect({ memoryKiB: MAX_KDF_PARAMS.memoryKiB, iterations: MAX_KDF_PARAMS.iterations }).toEqual({
+      memoryKiB: 262144,
+      iterations: 10,
+    });
+  });
+});
+
 describe('assertKdfParams', () => {
   it('should accept the default parameters', () => {
     expect(() => assertKdfParams({ ...DEFAULT_KDF_PARAMS })).not.toThrow();
+  });
+
+  it('should accept the floor and the ceiling', () => {
+    expect(() => {
+      assertKdfParams({ ...MIN_KDF_PARAMS });
+      assertKdfParams({ ...MAX_KDF_PARAMS });
+    }).not.toThrow();
   });
 
   it('should accept stronger parameters', () => {
@@ -91,20 +134,42 @@ describe('assertKdfParams', () => {
   });
 
   it.each([
+    ['memory one KiB under the floor', { ...MIN_KDF_PARAMS, memoryKiB: 65535 }],
+    ['iterations under the floor', { ...MIN_KDF_PARAMS, iterations: 2 }],
     ['weaker memory', { ...DEFAULT_KDF_PARAMS, memoryKiB: 8 }],
     ['fewer iterations', { ...DEFAULT_KDF_PARAMS, iterations: 1 }],
-    ['excessive memory', { ...DEFAULT_KDF_PARAMS, memoryKiB: 4 * 1024 * 1024 }],
+    ['memory one KiB over the ceiling', { ...MAX_KDF_PARAMS, memoryKiB: 262145 }],
+    ['iterations over the ceiling', { ...MAX_KDF_PARAMS, iterations: 11 }],
+    ['1 GiB of memory', { ...DEFAULT_KDF_PARAMS, memoryKiB: 1024 * 1024 }],
     ['excessive iterations', { ...DEFAULT_KDF_PARAMS, iterations: 1000 }],
     ['parallelism other than 1', { ...DEFAULT_KDF_PARAMS, parallelism: 4 }],
     ['an unknown algorithm', { ...DEFAULT_KDF_PARAMS, algorithm: 'scrypt' }],
     ['a fractional value', { ...DEFAULT_KDF_PARAMS, iterations: 3.5 }],
     ['a string value', { ...DEFAULT_KDF_PARAMS, memoryKiB: '65536' }],
+    ['NaN', { ...DEFAULT_KDF_PARAMS, memoryKiB: Number.NaN }],
     ['null', null],
     ['a string', 'argon2id'],
   ])('should throw INVALID_KDF_PARAMS for %s', (_, params) => {
     expect(() => assertKdfParams(params)).toThrow(
       expect.objectContaining({ code: 'INVALID_KDF_PARAMS' }),
     );
+  });
+});
+
+describe('needsKdfUpgrade', () => {
+  const defaults = smallParams(1024, 4);
+
+  it('should be false for the current defaults', () => {
+    expect(needsKdfUpgrade(DEFAULT_KDF_PARAMS)).toBe(false);
+  });
+
+  it.each([
+    ['less memory', smallParams(512, 4), true],
+    ['fewer iterations', smallParams(1024, 3), true],
+    ['the same parameters', smallParams(1024, 4), false],
+    ['stronger parameters', smallParams(2048, 5), false],
+  ])('should be true only when below the defaults: %s', (_, params, expected) => {
+    expect(needsKdfUpgrade(params, defaults)).toBe(expected);
   });
 });
 
