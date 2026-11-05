@@ -41,6 +41,7 @@ describe('guardedGet', () => {
     const init = calls[0]?.init;
     expect(init?.method).toBe('GET');
     expect(init?.redirect).toBe('manual');
+    expect(init?.cache).toBe('no-store');
     expect(init?.headers).toEqual({ 'User-Agent': USER_AGENT, Accept: 'text/html' });
     expect(USER_AGENT).toContain('StashPreview/');
     expect(USER_AGENT).toContain('+https://stash.alvarotc.com');
@@ -146,6 +147,14 @@ describe('guardedGet', () => {
     expect(
       await codeOf(guardedGet(START, 'text/html', ctx(fetch, { signal: controller.signal }))),
     ).toBe('UPSTREAM_TIMEOUT');
+  });
+});
+
+describe('runtime support', () => {
+  it('should accept the no-store cache mode used for outbound requests', () => {
+    const request = new Request('https://blog.example.org/', { cache: 'no-store' });
+
+    expect(request.cache).toBe('no-store');
   });
 });
 

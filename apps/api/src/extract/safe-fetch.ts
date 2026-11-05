@@ -76,6 +76,8 @@ async function requestOnce(url: URL, accept: string, ctx: RequestContext): Promi
         method: 'GET',
         headers: { 'User-Agent': USER_AGENT, Accept: accept },
         redirect: 'manual',
+        // Never stored in the Cloudflare cache of the zone: the proxy keeps nothing (D10).
+        cache: 'no-store',
         signal: ctx.signal,
       }),
       ctx.signal,
