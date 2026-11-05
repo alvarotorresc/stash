@@ -29,5 +29,8 @@
   },
   "peerDependencies": {
     "svelte": "^5.57.3"
+  },
+  "dependencies": {
+    "@stash/core": "workspace:*"
   }
 }
