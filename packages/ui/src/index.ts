@@ -40,6 +40,9 @@ export { default as TweetContent } from './reading/TweetContent.svelte';
 export { default as RedditContent } from './reading/RedditContent.svelte';
 export { default as PreviewContent } from './reading/PreviewContent.svelte';
 
+export { default as PasswordMeter, type PasswordStrength } from './account/PasswordMeter.svelte';
+export { default as RecoveryCodeScreen } from './account/RecoveryCodeScreen.svelte';
+
 export { PRIORITY_LABELS } from './types';
 export type {
   CategoryOption,
