@@ -16,13 +16,14 @@ content to read it inside the app. The server only stores encrypted data it cann
 
 ## Repository layout
 
-| Path             | What                                                  |
-| ---------------- | ----------------------------------------------------- |
-| `packages/core`  | Domain model and logic in plain TypeScript            |
-| `packages/ui`    | Svelte components shared by the PWA and the extension |
-| `apps/pwa`       | Progressive web app                                   |
-| `apps/extension` | Browser extension                                     |
-| `apps/api`       | Cloudflare Worker                                     |
+| Path              | What                                                  |
+| ----------------- | ----------------------------------------------------- |
+| `packages/core`   | Domain model and logic in plain TypeScript            |
+| `packages/ui`     | Svelte components shared by the PWA and the extension |
+| `packages/reader` | Preview and reader mode parsing, run on the device    |
+| `apps/pwa`        | Progressive web app                                   |
+| `apps/extension`  | Browser extension                                     |
+| `apps/api`        | Cloudflare Worker                                     |
 
 ## Local development
 
