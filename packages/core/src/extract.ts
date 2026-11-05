@@ -100,6 +100,8 @@ export const EXTRACT_ERROR_CODES = [
   'UPSTREAM_ERROR',
   /** 504: the origin took too long. */
   'UPSTREAM_TIMEOUT',
+  /** 500: unexpected server error. */
+  'INTERNAL_ERROR',
 ] as const;
 
 export type ExtractErrorCode = (typeof EXTRACT_ERROR_CODES)[number];
