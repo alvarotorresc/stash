@@ -359,6 +359,25 @@ describe('changePassword', () => {
     ).rejects.toMatchObject({ code: 'INVALID_KDF_PARAMS' });
   });
 
+  it('should refuse a live login handle in place of the current password', async () => {
+    // Previously changePassword(handle, wrappedDataKey, newPassword) re-wrapped the data key
+    // under a password the caller chose, which let a script recover the raw data key.
+    const { account } = await registerWithData();
+    const handle = await login(PASSWORD, account.server);
+    const legacyCall = changePassword as unknown as (...args: unknown[]) => Promise<unknown>;
+
+    const attempts = await Promise.allSettled([
+      legacyCall(handle, account.server.wrappedDataKey, 'attacker password 1'),
+      legacyCall(handle, {
+        email: EMAIL,
+        wrappedDataKey: account.server.wrappedDataKey,
+        newPassword: 'attacker password 1',
+      }),
+    ]);
+
+    expect(attempts.map((attempt) => attempt.status)).toEqual(['rejected', 'rejected']);
+  });
+
   it('should leave a login handle no way to re-wrap the data key', async () => {
     // A handle left alive after login must not let a script re-wrap the data key under a
     // password it chooses, which would reveal the raw data key.
