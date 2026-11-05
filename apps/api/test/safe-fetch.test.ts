@@ -44,7 +44,7 @@ describe('guardedGet', () => {
     expect(init?.cache).toBe('no-store');
     expect(init?.headers).toEqual({ 'User-Agent': USER_AGENT, Accept: 'text/html' });
     expect(USER_AGENT).toContain('StashPreview/');
-    expect(USER_AGENT).toContain('+https://stash.alvarotc.com');
+    expect(USER_AGENT).toContain('; +https://stash.alvarotc.com/bot)');
     expect(USER_AGENT).not.toMatch(/Chrome|Safari|Firefox|Gecko/);
   });
 

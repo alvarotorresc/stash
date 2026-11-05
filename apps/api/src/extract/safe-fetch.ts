@@ -8,8 +8,12 @@ import { isAllowedTarget } from './url-guard';
 
 export type Fetcher = typeof fetch;
 
-/** Honest, own User-Agent: identifies the bot and where to learn about it. Never a browser's. */
-export const USER_AGENT = 'Mozilla/5.0 (compatible; StashPreview/0.1; +https://stash.alvarotc.com)';
+/**
+ * Honest, own User-Agent: identifies the bot and links to the page that explains it (pending, see
+ * the README). Never a browser's.
+ */
+export const USER_AGENT =
+  'Mozilla/5.0 (compatible; StashPreview/0.1; +https://stash.alvarotc.com/bot)';
 
 export type UpstreamErrorCode =
   | 'URL_NOT_ALLOWED'

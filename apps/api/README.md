@@ -19,3 +19,13 @@ The server does not decode the image, so it does not limit its dimensions. A sma
 declare a huge canvas (a pixel bomb). That protection belongs to the client: when it builds the
 thumbnail, it must read or bound the dimensions before decoding (for example with
 `createImageBitmap` and `resizeWidth`/`resizeHeight`) and discard images above a megapixel limit.
+
+### User-Agent
+
+Outbound requests identify themselves as
+`Mozilla/5.0 (compatible; StashPreview/0.1; +https://stash.alvarotc.com/bot)` and send only
+`User-Agent` and `Accept`.
+
+**Pending before release:** publish the page at `https://stash.alvarotc.com/bot`. It must explain
+what StashPreview does (it only downloads a page when a user saves a link, stores nothing and
+follows no links) and how to contact the maintainer.
