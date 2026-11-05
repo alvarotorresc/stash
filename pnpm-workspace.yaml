@@ -3,3 +3,7 @@ packages:
   - apps/*
 
 saveExact: true
+
+# Dependencies whose install scripts are not needed: they ship prebuilt binaries.
+allowBuilds:
+  lefthook: false
