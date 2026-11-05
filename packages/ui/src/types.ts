@@ -22,3 +22,14 @@ export const PRIORITY_LABELS: Record<Priority, string> = {
   medium: 'Media',
   low: 'Baja',
 };
+
+/**
+ * HTML that has already been sanitized by the caller. The kit renders it as
+ * is and never sanitizes; the brand keeps raw strings from slipping in.
+ */
+export type SanitizedHtml = string & { readonly __brand: 'SanitizedHtml' };
+
+export interface ImageData {
+  src: string;
+  alt: string;
+}
