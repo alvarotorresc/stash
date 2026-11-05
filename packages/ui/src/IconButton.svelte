@@ -9,10 +9,10 @@
     label: string;
   }
 
-  let { icon, label, type = 'button', ...rest }: Props = $props();
+  let { icon, label, class: className = '', type = 'button', ...rest }: Props = $props();
 </script>
 
-<button {type} class="ib" aria-label={label} {...rest}>
+<button {type} class="ib {className}" aria-label={label} {...rest}>
   <Icon name={icon} />
 </button>
 

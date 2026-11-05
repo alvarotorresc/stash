@@ -24,6 +24,7 @@
     unavailable = false,
     icon,
     block = false,
+    class: className = '',
     type = 'button',
     onclick,
     ...rest
@@ -40,7 +41,7 @@
 
 <button
   {type}
-  class="btn {variant}"
+  class="btn {variant} {className}"
   class:unavailable
   class:block
   aria-disabled={unavailable ? 'true' : undefined}

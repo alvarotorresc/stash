@@ -32,5 +32,7 @@ export { default as UndoToast, type UndoToastData } from './UndoToast.svelte';
 export { default as EmptyState } from './EmptyState.svelte';
 export { default as LoadingRows } from './LoadingRows.svelte';
 
+export { default as CategoryList, type ListEntry } from './CategoryList.svelte';
+
 export { PRIORITY_LABELS } from './types';
 export type { CategoryOption, Priority, TagSuggestion, Tone } from './types';
