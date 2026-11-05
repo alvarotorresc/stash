@@ -5,7 +5,8 @@
   "license": "AGPL-3.0-only",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./extract": "./src/extract.ts"
   },
   "scripts": {
     "typecheck": "tsc",
