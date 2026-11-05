@@ -1,0 +1,27 @@
+name = "stash-api"
+main = "src/index.ts"
+compatibility_date = "2026-11-03"
+# No Wrangler usage telemetry from this project.
+send_metrics = false
+
+# Not exposed on workers.dev or preview URLs: the route under the app domain is set at deploy time.
+workers_dev = false
+preview_urls = false
+
+# No logs, traces or request analytics persisted by the Worker (privacy by default).
+[observability]
+enabled = false
+
+[observability.logs]
+enabled = false
+invocation_logs = false
+
+[observability.traces]
+enabled = false
+
+# D1 database: created at deploy time. Replace the placeholder id and uncomment.
+# [[d1_databases]]
+# binding = "DB"
+# database_name = "stash"
+# database_id = "00000000-0000-0000-0000-000000000000"
+# migrations_dir = "migrations"

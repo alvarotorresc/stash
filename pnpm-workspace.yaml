@@ -6,4 +6,6 @@ saveExact: true
 
 # Dependencies whose install scripts are not needed: they ship prebuilt binaries.
 allowBuilds:
+  esbuild: false
   lefthook: false
+  workerd: false
