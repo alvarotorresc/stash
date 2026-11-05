@@ -38,7 +38,7 @@ async function everyPublicResult(): Promise<unknown[]> {
     newPassword: 'newer password',
   });
   const store = core.createIndexedDbDataKeyStore({ indexedDB: new IDBFactory() });
-  await store.save(unlocked.dataKey);
+  await store.save(unlocked.dataKey, { afterPasswordEntry: true });
   const persisted = await store.load();
   return [account, credentials, unlocked, changed, recovery, recovered, persisted];
 }
