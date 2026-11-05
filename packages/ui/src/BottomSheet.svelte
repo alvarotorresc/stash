@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
+  import { capturePointer } from './gestures';
 
   /** A quick flick closes the sheet regardless of distance (px per ms). */
   const FLICK_VELOCITY = 0.11;
@@ -89,7 +90,7 @@
     if (drag || !event.isPrimary) return;
     drag = { id: event.pointerId, startY: event.clientY, startTime: event.timeStamp, offset: 0 };
     dragging = true;
-    (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
+    capturePointer(event.currentTarget as Element, event.pointerId);
   }
 
   function onpointermove(event: PointerEvent) {

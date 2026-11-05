@@ -3,6 +3,7 @@
   import Button from './Button.svelte';
   import IconButton from './IconButton.svelte';
   import Icon from './icons/Icon.svelte';
+  import { capturePointer } from './gestures';
 
   export interface ListEntry {
     id: string;
@@ -114,7 +115,7 @@
     drag = { pointer: event.pointerId, startY: event.clientY, offset: 0 };
     dragId = id;
     dragOrder = items.map((item) => item.id);
-    (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
+    capturePointer(event.currentTarget as Element, event.pointerId);
   }
 
   function onpointermove(event: PointerEvent) {
