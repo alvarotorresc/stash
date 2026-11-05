@@ -4,9 +4,18 @@ compatibility_date = "2026-11-03"
 # No Wrangler usage telemetry from this project.
 send_metrics = false
 
-# Not exposed on workers.dev or preview URLs: the route under the app domain is set at deploy time.
+# Not exposed on workers.dev or preview URLs: only the app domain.
 workers_dev = false
 preview_urls = false
+
+routes = [{ pattern = "stash.alvarotc.com", custom_domain = true }]
+
+# The same Worker serves the PWA; only /api/* runs the Worker code.
+[assets]
+directory = "../pwa/dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*"]
 
 # No logs, traces or request analytics persisted by the Worker (privacy by default).
 [observability]
@@ -19,9 +28,8 @@ invocation_logs = false
 [observability.traces]
 enabled = false
 
-# D1 database: created at deploy time. Replace the placeholder id and uncomment.
-# [[d1_databases]]
-# binding = "DB"
-# database_name = "stash"
-# database_id = "00000000-0000-0000-0000-000000000000"
-# migrations_dir = "migrations"
+[[d1_databases]]
+binding = "DB"
+database_name = "stash"
+database_id = "99e943b1-256f-4510-829a-86ae5c899f51"
+migrations_dir = "migrations"
