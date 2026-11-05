@@ -22,5 +22,9 @@ export { default as CategoryPicker } from './CategoryPicker.svelte';
 export { default as Tag } from './Tag.svelte';
 export { default as TagInput } from './TagInput.svelte';
 
+export { default as InlineNotice } from './InlineNotice.svelte';
+export { default as BottomSheet } from './BottomSheet.svelte';
+export { default as SaveSheet } from './SaveSheet.svelte';
+
 export { PRIORITY_LABELS } from './types';
 export type { CategoryOption, Priority, TagSuggestion, Tone } from './types';
