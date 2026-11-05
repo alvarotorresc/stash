@@ -73,6 +73,22 @@ describe('parseAllowedTarget', () => {
   });
 
   it.each([
+    'https://alvarotc.com/',
+    'http://ALVAROTC.com./blog',
+    'https://flame.alvarotc.com/',
+    'https://quedamos.api.alvarotc.com/v1/health',
+  ])('should reject every host of the own zone, such as %s', (input) => {
+    expect(parseAllowedTarget(input)).toBeNull();
+  });
+
+  it.each(['https://notalvarotc.com/', 'https://alvarotc.com.example.org/'])(
+    'should allow %s, which only looks like the own zone',
+    (input) => {
+      expect(parseAllowedTarget(input)).not.toBeNull();
+    },
+  );
+
+  it.each([
     'http://127.0.0.1/',
     'http://127.255.255.254/',
     'http://0.0.0.0/',

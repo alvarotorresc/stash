@@ -14,8 +14,11 @@ const ALLOWED_PROTOCOLS = new Set(['http:', 'https:']);
 /** `URL.port` is '' when the port is the default one of the scheme. */
 const ALLOWED_PORTS = new Set(['', '80', '443']);
 
-/** The app itself: the proxy must never request its own API. */
-const SELF_HOSTNAMES = ['stash.alvarotc.com'];
+/**
+ * The own zone, subdomains included: the proxy must never request its own API nor any other
+ * service of the zone, so it cannot be used to reach them with the identity of the app.
+ */
+const SELF_HOSTNAMES = ['alvarotc.com'];
 
 /** Names that are local by definition (RFC 6761, RFC 8375 and common private suffixes). */
 const LOCAL_SUFFIXES = [
