@@ -6,8 +6,10 @@
  * in their canonical form.
  *
  * Limit: Workers does not expose DNS resolution, so a public hostname whose DNS points to a private
- * address cannot be detected here. Requests leave from the Cloudflare network, which has no access
- * to a private network of ours; the guard covers addresses and names that are local by definition.
+ * address (`127.0.0.1.nip.io`, DNS rebinding) cannot be detected here. That risk is accepted: the
+ * `global_fetch_strictly_public` flag sends every fetch through the public internet, and requests
+ * leave from the Cloudflare network, which has no access to a private network of ours. The guard
+ * covers addresses and names that are local by definition.
  */
 
 const ALLOWED_PROTOCOLS = new Set(['http:', 'https:']);

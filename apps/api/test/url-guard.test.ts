@@ -154,6 +154,23 @@ describe('parseAllowedTarget', () => {
   });
 });
 
+describe('accepted residual risk: public names that resolve to private addresses', () => {
+  // Workers cannot resolve DNS, so the guard only sees the name. These pass on purpose, and this
+  // test passes from the start: it documents the accepted risk, it does not prove a protection.
+  // The mitigation is outside the guard: `global_fetch_strictly_public` (checked in
+  // config.test.ts) sends every fetch through the public internet, and requests leave from the
+  // Cloudflare network, which cannot route to a private network of ours. Revisit this if the
+  // Worker is ever bound to something private (VPC, Tunnel, service bindings with data).
+  it.each([
+    'http://127.0.0.1.nip.io/',
+    'http://10.0.0.1.sslip.io/',
+    'http://localtest.me/',
+    'http://rebind.attacker.example.com/',
+  ])('should let %s through the guard', (input) => {
+    expect(parseAllowedTarget(input)).not.toBeNull();
+  });
+});
+
 describe('isAllowedTarget', () => {
   it('should reject a url whose hostname is empty', () => {
     expect(isAllowedTarget(new URL('http://./'))).toBe(false);
