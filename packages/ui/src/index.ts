@@ -16,5 +16,11 @@ export { default as GroupHeader } from './GroupHeader.svelte';
 export { default as UnsortedStrip } from './UnsortedStrip.svelte';
 export { rowExit } from './transitions';
 
+export { default as PrioritySegment } from './PrioritySegment.svelte';
+export { default as Chip } from './Chip.svelte';
+export { default as CategoryPicker } from './CategoryPicker.svelte';
+export { default as Tag } from './Tag.svelte';
+export { default as TagInput } from './TagInput.svelte';
+
 export { PRIORITY_LABELS } from './types';
 export type { CategoryOption, Priority, TagSuggestion, Tone } from './types';
