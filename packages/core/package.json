@@ -12,8 +12,12 @@
     "test": "vitest run --coverage"
   },
   "devDependencies": {
+    "@noble/hashes": "2.4.0",
     "@vitest/coverage-v8": "5.1.0",
     "typescript": "6.0.3",
     "vitest": "5.1.0"
+  },
+  "dependencies": {
+    "libsodium-wrappers-sumo": "0.8.4"
   }
 }
