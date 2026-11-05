@@ -11,8 +11,6 @@
  */
 
 const ALLOWED_PROTOCOLS = new Set(['http:', 'https:']);
-/** `URL.port` is '' when the port is the default one of the scheme. */
-const ALLOWED_PORTS = new Set(['', '80', '443']);
 
 /**
  * The own zone, subdomains included: the proxy must never request its own API nor any other
@@ -110,6 +108,7 @@ export function isBlockedIpv6(address: string): boolean {
   if (first === 0x2002) return true; // 6to4, embeds IPv4
   if (first === 0x2001 && second < 0x0200) return true; // 2001::/23 IETF, includes Teredo
   if (first === 0x2001 && second === 0x0db8) return true; // documentation
+  if (first === 0x3fff && second < 0x1000) return true; // documentation, 3fff::/20 (RFC 9637)
   return false;
 }
 
@@ -125,7 +124,9 @@ function isSelfHostname(hostname: string): boolean {
 /** Returns true when the Worker may request this URL. */
 export function isAllowedTarget(url: URL): boolean {
   if (!ALLOWED_PROTOCOLS.has(url.protocol)) return false;
-  if (!ALLOWED_PORTS.has(url.port)) return false;
+  // Only the default port of each scheme (http on 80, https on 443). The parser serialises the
+  // default port as '', so `http://host:443` and `https://host:80` keep a port and are rejected.
+  if (url.port !== '') return false;
   if (url.username !== '' || url.password !== '') return false;
 
   // A trailing dot is the same name for DNS (`localhost.` is `localhost`).

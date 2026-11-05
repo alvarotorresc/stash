@@ -49,6 +49,13 @@ describe('parseAllowedTarget', () => {
     expect(parseAllowedTarget(input)).toBeNull();
   });
 
+  it.each(['http://example.org:443/', 'https://example.org:80/'])(
+    'should reject the port of the other scheme in %s',
+    (input) => {
+      expect(parseAllowedTarget(input)).toBeNull();
+    },
+  );
+
   it('should reject urls with credentials', () => {
     expect(parseAllowedTarget('https://user:pass@example.org/')).toBeNull();
     expect(parseAllowedTarget('https://user@example.org/')).toBeNull();
@@ -121,6 +128,7 @@ describe('parseAllowedTarget', () => {
     expect(parseAllowedTarget('http://172.32.0.1/')).not.toBeNull();
     expect(parseAllowedTarget('http://11.0.0.1/')).not.toBeNull();
     expect(parseAllowedTarget('http://100.128.0.1/')).not.toBeNull();
+    expect(parseAllowedTarget('http://[3fff:1000::1]/')).not.toBeNull();
   });
 
   it.each([
@@ -139,6 +147,8 @@ describe('parseAllowedTarget', () => {
     ['6to4', 'http://[2002:7f00:1::1]/'],
     ['Teredo', 'http://[2001:0:4136:e378::1]/'],
     ['documentation', 'http://[2001:db8::1]/'],
+    ['documentation 3fff::/20', 'http://[3fff::1]/'],
+    ['documentation 3fff::/20, last block', 'http://[3fff:fff::1]/'],
   ])('should reject the IPv6 %s address', (_label, input) => {
     expect(parseAllowedTarget(input)).toBeNull();
   });
