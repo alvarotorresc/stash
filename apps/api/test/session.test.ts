@@ -27,6 +27,23 @@ describe('requireSession', () => {
     expect(await res.text()).toBe('account-1');
     expect(handler).toHaveBeenCalledWith(expect.any(Request), session);
   });
+
+  it('should answer the json 500 envelope and skip the handler when resolving throws', async () => {
+    const handler = vi.fn(async () => new Response('secret'));
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    const res = await requireSession(async () => {
+      throw new Error('token store down');
+    }, handler)(request());
+
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({
+      error: { code: 'INTERNAL_ERROR', message: 'Internal error' },
+    });
+    expect(handler).not.toHaveBeenCalled();
+    expect(JSON.stringify(error.mock.calls)).not.toContain('token store down');
+    error.mockRestore();
+  });
 });
 
 describe('resolveSession', () => {

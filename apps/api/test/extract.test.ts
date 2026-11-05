@@ -366,6 +366,40 @@ describe('POST /api/extract — request handling', () => {
     expect(limit).toHaveBeenCalledWith({ key: SESSION.accountId });
   });
 
+  it('should answer the json 500 envelope when the rate limiter throws', async () => {
+    const { fetch, calls } = fakeFetch({ [ARTICLE]: () => html(ARTICLE_HTML) });
+    const limit = vi.fn(async () => {
+      throw new Error(`limiter down while handling ${ARTICLE}`);
+    });
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    const res = await app({ fetch, rateLimiter: { limit } })(
+      '/api/extract',
+      postJson({ url: ARTICLE }),
+    );
+
+    expect(await errorOf(res)).toEqual({ status: 500, code: 'INTERNAL_ERROR' });
+    expect(calls).toHaveLength(0);
+    expect(JSON.stringify(error.mock.calls)).not.toContain(ARTICLE);
+    error.mockRestore();
+  });
+
+  it('should answer the json 500 envelope when resolving the session throws', async () => {
+    const { fetch, calls } = fakeFetch({ [ARTICLE]: () => html(ARTICLE_HTML) });
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    const res = await app({
+      fetch,
+      resolveSession: async () => {
+        throw new Error('session store down');
+      },
+    })('/api/extract', postJson({ url: ARTICLE }));
+
+    expect(await errorOf(res)).toEqual({ status: 500, code: 'INTERNAL_ERROR' });
+    expect(calls).toHaveLength(0);
+    error.mockRestore();
+  });
+
   it('should refuse a body that is not json', async () => {
     const res = await app({ fetch: noFetch })('/api/extract', {
       method: 'POST',

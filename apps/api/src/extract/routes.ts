@@ -110,9 +110,10 @@ export function createExtractRoutes(deps: ExtractDeps) {
     session: Session,
     run: (target: URL, signal: AbortSignal) => Promise<Response>,
   ): Promise<Response> {
-    const { success } = await deps.rateLimiter.limit({ key: session.accountId });
-    if (!success) return jsonError('RATE_LIMITED', 'Too many requests', 429);
     try {
+      // Inside the try: a failing limiter answers the JSON envelope, never the platform error page.
+      const { success } = await deps.rateLimiter.limit({ key: session.accountId });
+      if (!success) return jsonError('RATE_LIMITED', 'Too many requests', 429);
       const target = await readTarget(request);
       return await run(target, AbortSignal.timeout(limits.timeoutMs));
     } catch (error) {

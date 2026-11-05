@@ -29,7 +29,15 @@ export function requireSession(
   handler: SessionHandler,
 ): (request: Request) => Promise<Response> {
   return async (request) => {
-    const session = await resolve(request);
+    let session: Session | null;
+    try {
+      session = await resolve(request);
+    } catch (error) {
+      // Fail closed with the JSON envelope instead of the platform error page. Only the error type
+      // is reported: its message could carry a token or other request data.
+      console.error('session: resolver failed', error instanceof Error ? error.name : typeof error);
+      return jsonError('INTERNAL_ERROR', 'Internal error', 500);
+    }
     if (!session) return jsonError('UNAUTHORIZED', 'Authentication required', 401);
     return handler(request, session);
   };
