@@ -1,0 +1,39 @@
+{
+  "name": "stash",
+  "version": "0.0.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "packageManager": "pnpm@12.16.1",
+  "engines": {
+    "node": ">=26.13.0"
+  },
+  "devEngines": {
+    "runtime": {
+      "name": "node",
+      "version": "26.13.0",
+      "onFail": "download"
+    }
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "build": "pnpm -r build",
+    "prepare": "lefthook install"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "eslint": "10.14.0",
+    "eslint-plugin-svelte": "3.24.0",
+    "globals": "17.14.0",
+    "lefthook": "2.2.2",
+    "prettier": "3.9.10",
+    "prettier-plugin-svelte": "4.1.1",
+    "svelte": "5.57.3",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.1"
+  }
+}

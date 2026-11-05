@@ -1,0 +1,35 @@
+name = "stash-api"
+main = "src/index.ts"
+compatibility_date = "2026-11-03"
+# No Wrangler usage telemetry from this project.
+send_metrics = false
+
+# Not exposed on workers.dev or preview URLs: only the app domain.
+workers_dev = false
+preview_urls = false
+
+routes = [{ pattern = "stash.alvarotc.com", custom_domain = true }]
+
+# The same Worker serves the PWA; only /api/* runs the Worker code.
+[assets]
+directory = "../pwa/dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*"]
+
+# No logs, traces or request analytics persisted by the Worker (privacy by default).
+[observability]
+enabled = false
+
+[observability.logs]
+enabled = false
+invocation_logs = false
+
+[observability.traces]
+enabled = false
+
+[[d1_databases]]
+binding = "DB"
+database_name = "stash"
+database_id = "99e943b1-256f-4510-829a-86ae5c899f51"
+migrations_dir = "migrations"
