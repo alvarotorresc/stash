@@ -11,6 +11,7 @@ export type {
   PasswordSetup,
   RecoveryCredentials,
   RecoverySetup,
+  UnlockedDataKey,
 } from './account';
 export { constantTimeEqual, fromBase64Url, toBase64Url } from './bytes';
 export { CryptoError } from './errors';

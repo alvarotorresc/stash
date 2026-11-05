@@ -190,7 +190,7 @@ describe('PasswordCredentials.unlockDataKey', () => {
     const { account, blob } = await registerWithData();
     const credentials = await login(PASSWORD, account.server);
 
-    const dataKey = await credentials.unlockDataKey(account.server.wrappedDataKey);
+    const { dataKey } = await credentials.unlockDataKey(account.server.wrappedDataKey);
 
     expect(await decryptRecord(dataKey, RECORD_ID, blob)).toEqual(plaintext);
   });
@@ -206,7 +206,7 @@ describe('PasswordCredentials.unlockDataKey', () => {
       password: PASSWORD,
       ...account.server,
     });
-    const dataKey = await credentials.unlockDataKey(account.server.wrappedDataKey);
+    const { dataKey } = await credentials.unlockDataKey(account.server.wrappedDataKey);
 
     expect(await freshRecords.decryptRecord(dataKey, RECORD_ID, blob)).toEqual(plaintext);
   });
@@ -218,6 +218,15 @@ describe('PasswordCredentials.unlockDataKey', () => {
     await expect(credentials.unlockDataKey(account.server.wrappedDataKey)).rejects.toMatchObject({
       code: 'DECRYPTION_FAILED',
     });
+  });
+
+  it('should offer no upgrade when the parameters are the current defaults', async () => {
+    const { account } = await registerWithData();
+    const credentials = await login(PASSWORD, account.server);
+
+    const { upgrade } = await credentials.unlockDataKey(account.server.wrappedDataKey);
+
+    expect(upgrade).toBeNull();
   });
 
   it('should be single use', async () => {
@@ -261,7 +270,7 @@ describe('changePassword', () => {
 
     const { server } = await change(account);
     const next = await login(NEW_PASSWORD, server);
-    const dataKey = await next.unlockDataKey(server.wrappedDataKey);
+    const { dataKey } = await next.unlockDataKey(server.wrappedDataKey);
 
     expect(await decryptRecord(dataKey, RECORD_ID, blob)).toEqual(plaintext);
   });
@@ -390,7 +399,7 @@ describe('recoverAccount', () => {
       newPassword: NEW_PASSWORD,
     });
     const credentials = await login(NEW_PASSWORD, recovered.server);
-    const dataKey = await credentials.unlockDataKey(recovered.server.wrappedDataKey);
+    const { dataKey } = await credentials.unlockDataKey(recovered.server.wrappedDataKey);
 
     expect(await decryptRecord(dataKey, RECORD_ID, blob)).toEqual(plaintext);
   });
