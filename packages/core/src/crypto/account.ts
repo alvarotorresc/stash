@@ -11,6 +11,7 @@ import {
   importKeyMaterial,
   type KdfParams,
 } from './kdf';
+import { assertNewPassword } from './password-policy';
 import type { DataKey } from './records';
 import { generateRecoveryCode, parseRecoveryCode } from './recovery-code';
 
@@ -197,6 +198,7 @@ async function setUpAccount(password: string, extractableDataKey: CryptoKey): Pr
 
 /** Registration: creates the data key, the recovery code and everything the server stores. */
 export async function createAccountKeys(password: string): Promise<AccountKeys> {
+  assertNewPassword(password);
   const extractableDataKey = await crypto.subtle.generateKey(
     { name: 'AES-GCM', length: 256 },
     true,
@@ -227,6 +229,7 @@ export async function changePassword(
   wrappedDataKey: string,
   newPassword: string,
 ): Promise<{ server: PasswordSetup; dataKey: DataKey }> {
+  assertNewPassword(newPassword);
   const kek = PasswordCredentialsHandle.kekOf(current);
   const extractableDataKey = await unwrap(kek, wrappedDataKey, WRAP_CONTEXT.password, true);
   const { setup, dataKey } = await setUpPassword(newPassword, extractableDataKey);
@@ -249,6 +252,7 @@ export async function recoverAccount(
   recoveryWrappedDataKey: string,
   newPassword: string,
 ): Promise<AccountKeys> {
+  assertNewPassword(newPassword);
   const kek = RecoveryCredentialsHandle.kekOf(recovery);
   let extractableDataKey: CryptoKey;
   try {

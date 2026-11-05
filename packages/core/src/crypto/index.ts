@@ -17,6 +17,8 @@ export { CryptoError } from './errors';
 export type { CryptoErrorCode } from './errors';
 export { DEFAULT_KDF_PARAMS } from './kdf';
 export type { KdfParams } from './kdf';
+export { MIN_PASSWORD_LENGTH, checkPassword } from './password-policy';
+export type { PasswordCheck } from './password-policy';
 export { DATA_KEY_TTL_MS, createIndexedDbDataKeyStore } from './key-store';
 export type { DataKeyStore, IndexedDbDataKeyStoreOptions } from './key-store';
 export { decryptRecord, encryptRecord } from './records';

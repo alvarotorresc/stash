@@ -70,9 +70,14 @@ describe('createAccountKeys', () => {
     expect(first.server.salt).not.toBe(second.server.salt);
   });
 
-  it('should throw INVALID_INPUT when the password is empty', async () => {
-    await expect(createAccountKeys('')).rejects.toMatchObject({ code: 'INVALID_INPUT' });
-  });
+  it.each(['', 'nine char'])(
+    'should throw PASSWORD_TOO_SHORT for a password of fewer than 10 characters (%j)',
+    async (password) => {
+      await expect(createAccountKeys(password)).rejects.toMatchObject({
+        code: 'PASSWORD_TOO_SHORT',
+      });
+    },
+  );
 });
 
 describe('derivePasswordCredentials', () => {
@@ -101,6 +106,22 @@ describe('derivePasswordCredentials', () => {
     );
 
     expect(credentials.loginKey).toBe(account.server.loginKey);
+  });
+
+  it('should not apply the length rule to the password typed at login', async () => {
+    const { account } = await registerWithData();
+
+    const credentials = await derivePasswordCredentials('short', loginParams(account));
+
+    expect(credentials.loginKey).not.toBe(account.server.loginKey);
+  });
+
+  it('should throw INVALID_INPUT when the password is empty', async () => {
+    const { account } = await registerWithData();
+
+    await expect(derivePasswordCredentials('', loginParams(account))).rejects.toMatchObject({
+      code: 'INVALID_INPUT',
+    });
   });
 
   it('should reject parameters weaker than the defaults', async () => {
@@ -234,6 +255,15 @@ describe('changePassword', () => {
     ).rejects.toMatchObject({ code: 'DECRYPTION_FAILED' });
   });
 
+  it('should throw PASSWORD_TOO_SHORT when the new password is too short', async () => {
+    const { account } = await registerWithData();
+    const current = await derivePasswordCredentials(PASSWORD, loginParams(account));
+
+    await expect(
+      changePassword(current, account.server.wrappedDataKey, 'too short'),
+    ).rejects.toMatchObject({ code: 'PASSWORD_TOO_SHORT' });
+  });
+
   it('should reject credentials that core did not create', async () => {
     const { account } = await registerWithData();
     const forged = { loginKey: account.server.loginKey, unlockDataKey: vi.fn() };
@@ -308,6 +338,15 @@ describe('recoverAccount', () => {
     await expect(
       recoverAccount(oldRecovery, recovered.server.recoveryWrappedDataKey, 'third password'),
     ).rejects.toMatchObject({ code: 'INVALID_RECOVERY_CODE' });
+  });
+
+  it('should throw PASSWORD_TOO_SHORT when the new password is too short', async () => {
+    const { account } = await registerWithData();
+    const recovery = await deriveRecoveryCredentials(account.recoveryCode);
+
+    await expect(
+      recoverAccount(recovery, account.server.recoveryWrappedDataKey, 'too short'),
+    ).rejects.toMatchObject({ code: 'PASSWORD_TOO_SHORT' });
   });
 
   it('should throw INVALID_RECOVERY_CODE for a well-formed but wrong code', async () => {
