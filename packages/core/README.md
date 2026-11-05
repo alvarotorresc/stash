@@ -1,0 +1,102 @@
+# @stash/core
+
+Domain model and client-side cryptography shared by the PWA and the extension. Everything is
+plain TypeScript; the apps import it from source through the workspace.
+
+## Cryptography
+
+All encryption happens on the device. The server stores salts, parameters, hashes of the keys
+it receives and wrapped keys, never anything it can decrypt.
+
+### Key chain
+
+- **Password** → Argon2id (salt bound to the email) → HKDF → **login key** (sent to the
+  server) and **password KEK**.
+- **Recovery code** (128 random bits, shown once) → HKDF → **recovery auth key** (sent) and
+  **recovery KEK**.
+- **Data key**: 256 random bits, non-extractable, wrapped with AES-256-GCM by each KEK.
+- **Records**: AES-256-GCM with a random nonce; the record id is bound to each blob.
+
+Changing the password or recovering the account re-wraps the data key. No data is
+re-encrypted, and the data key never changes, so a password change is not a revocation.
+
+### API
+
+| Function                                                                                                       | Use                                                                                             |
+| -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `createAccountKeys({ email, password })`                                                                       | Registration. Returns what the server stores, the recovery code to show once and the data key.  |
+| `derivePasswordCredentials({ email, password, salt, kdf })`                                                    | Login. Returns single-use credentials: `loginKey` to send and `unlockDataKey(wrappedDataKey)`.  |
+| `credentials.unlockDataKey(wrappedDataKey)`                                                                    | Returns `{ dataKey, upgrade }`. Send `upgrade` to the server when it is not `null` (see below). |
+| `changePassword({ email, currentPassword, newPassword, salt, kdf, wrappedDataKey })`                           | Returns `currentLoginKey` (to authorise the change), the new password setup and the data key.   |
+| `deriveRecoveryCredentials(code)` / `recoverAccount(recovery, { email, recoveryWrappedDataKey, newPassword })` | Recovery in two steps. Sets a new password and issues a new recovery code.                      |
+| `encryptRecord(dataKey, recordId, bytes)` / `decryptRecord(dataKey, recordId, blob)`                           | Record blobs.                                                                                   |
+| `createIndexedDbDataKeyStore()`                                                                                | Remembers the data key on the device for 30 days.                                               |
+| `checkPassword(password)`                                                                                      | Pure check for the password field: `{ length, lengthOk, common }`.                              |
+
+Errors are `CryptoError` with a `code`: `CREDENTIALS_USED`, `DECRYPTION_FAILED`,
+`INVALID_INPUT`, `INVALID_KDF_PARAMS`, `INVALID_RECOVERY_CODE`, `KDF_FAILED` and
+`PASSWORD_TOO_SHORT`.
+
+### Passwords
+
+- New passwords (registration, change and recovery) need at least `MIN_PASSWORD_LENGTH` (10)
+  characters, counted as Unicode code points after NFC. Core throws `PASSWORD_TOO_SHORT`
+  otherwise. The password typed at login is not checked, so the rule can change without
+  locking anyone out.
+- There are no case or symbol rules. The UI uses `checkPassword` for its strength meter and
+  blocks passwords flagged as `common` (a small embedded list of very common passwords).
+- The server receives the login key on every login and knows the salt and parameters, so a
+  compromised server can always try to guess a password offline at the cost of Argon2id. A
+  long, uncommon password is what keeps the data safe.
+
+### Argon2id
+
+- **Disposable worker.** Argon2id runs in a dedicated module Web Worker, one per derivation,
+  which also does the HKDF split and returns only the login key and a non-extractable KEK. The
+  worker is terminated right after it answers: libsodium frees its WebAssembly buffers without
+  wiping them, and terminating the worker drops that memory. There is no fallback to the page
+  thread: where Web Workers are missing (such as an extension's background service worker) the
+  derivation fails with `KDF_FAILED`. Run it from a page or the popup.
+- **CSP.** The worker is bundled by Vite as a separate same-origin file, and libsodium
+  instantiates its WebAssembly from bytes, so `script-src 'self' 'wasm-unsafe-eval'` is enough.
+- **Parameters.** New passwords use `DEFAULT_KDF_PARAMS` (m = 64 MiB, t = 3, p = 1). Parameters
+  from the server must be between a floor (m = 64 MiB, t = 3), set independently of the
+  defaults and never below the OWASP minimum, and a ceiling (m = 256 MiB, t = 10) that keeps a
+  hostile server from making a phone hang.
+- **Upgrades.** When an account logs in with parameters below the current defaults,
+  `unlockDataKey` also returns `upgrade`: the same password under a new salt and the defaults,
+  with the data key re-wrapped. Send it to the server in the session that just logged in.
+- **Salt bound to the email.** The Argon2id salt is
+  `SHA-256("stash/v1/argon2id-salt" ‖ u32be(len(email)) ‖ email ‖ serverSalt)[0..16]`, with the
+  email trimmed, NFC-normalised and lowercased. A server cannot make several accounts share a
+  salt. Changing an account's email therefore requires re-deriving its password keys.
+
+### Credentials
+
+Password and recovery credentials are single use: `unlockDataKey` and `recoverAccount` consume
+them and a second call throws `CREDENTIALS_USED`. Do not keep them in long-lived state.
+`changePassword` takes the current password, not credentials, so nothing left over from a login
+can re-wrap the data key under a password someone else chooses.
+
+### Remembered data key
+
+`createIndexedDbDataKeyStore()` stores the non-extractable `CryptoKey` in IndexedDB.
+
+- **Not encrypted at rest.** "Non-extractable" means JavaScript cannot read the key bytes. It
+  is not disk encryption: the browser serialises the key material into its profile so it can
+  restore it, and anyone with access to the files (malware, a copy of the profile, forensics on
+  a rooted phone) may recover it. Protection on disk depends on the browser and on the device's
+  own encryption. Deleting from IndexedDB does not guarantee the bytes are gone from disk.
+- **30 days from the password.** `save(key, { afterPasswordEntry: true })` starts a 30-day
+  window and must only be called right after the user typed the password (login, password
+  change or recovery). `save(key, { afterPasswordEntry: false })` keeps the current window and
+  is refused when there is none. Opening the app with the remembered key never extends it.
+- **Fails closed.** `load()` returns the key only when the record is well formed and inside its
+  window. An expired, corrupted or tampered record, or a clock set back before the save, counts
+  as expired and is deleted as soon as it is read.
+
+### Known limits
+
+- The server can serve an older version of a record, hide records or return a deleted one: the
+  blob is bound to its record id, not to a version.
+- Blob size reveals the exact plaintext size (a fixed 29-byte overhead).
