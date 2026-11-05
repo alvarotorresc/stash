@@ -1,5 +1,5 @@
 import type sodiumType from 'libsodium-wrappers-sumo';
-import { utf8, type Bytes } from './bytes';
+import { concatBytes, utf8, type Bytes } from './bytes';
 import { CryptoError } from './errors';
 
 /**
@@ -76,6 +76,35 @@ export function needsKdfUpgrade(
   defaults: KdfParams = DEFAULT_KDF_PARAMS,
 ): boolean {
   return params.memoryKiB < defaults.memoryKiB || params.iterations < defaults.iterations;
+}
+
+const SALT_TAG = 'stash/v1/argon2id-salt';
+
+/** Trim, NFC and lowercase (locale-independent). Throws INVALID_INPUT when nothing is left. */
+export function normalizeEmail(email: string): string {
+  const normalized = email.trim().normalize('NFC').toLowerCase();
+  if (normalized.length === 0) {
+    throw new CryptoError('INVALID_INPUT', 'Email is required');
+  }
+  return normalized;
+}
+
+/**
+ * The effective Argon2id salt mixes the account's email into the salt the server stores:
+ * `SHA-256("stash/v1/argon2id-salt" ‖ u32be(len(email)) ‖ email ‖ serverSalt)[0..16]`.
+ * A server that handed several accounts the same salt still gets one Argon2id input per
+ * account, so a single dictionary pass cannot cover them all. Changing the email therefore
+ * requires re-deriving the password keys.
+ */
+export async function bindSaltToEmail(email: string, serverSalt: Bytes): Promise<Bytes> {
+  const emailBytes = utf8(normalizeEmail(email));
+  const length = new Uint8Array(4);
+  new DataView(length.buffer).setUint32(0, emailBytes.length);
+  const digest = await crypto.subtle.digest(
+    'SHA-256',
+    concatBytes(utf8(SALT_TAG), length, emailBytes, serverSalt),
+  );
+  return new Uint8Array(digest, 0, SALT_BYTES).slice();
 }
 
 export type Sodium = typeof sodiumType;

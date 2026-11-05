@@ -2,7 +2,14 @@ import { openKey, sealKey } from './aead';
 import { derivePasswordKeysInWorker } from './argon2-client';
 import { fromBase64Url, randomBytes, toBase64Url, utf8, type Bytes } from './bytes';
 import { CryptoError } from './errors';
-import { DEFAULT_KDF_PARAMS, SALT_BYTES, assertKdfParams, type KdfParams } from './kdf';
+import {
+  DEFAULT_KDF_PARAMS,
+  SALT_BYTES,
+  assertKdfParams,
+  bindSaltToEmail,
+  normalizeEmail,
+  type KdfParams,
+} from './kdf';
 import { INFO, splitKeyMaterial, type SplitKeys } from './key-chain';
 import { assertNewPassword } from './password-policy';
 import type { DataKey } from './records';
@@ -11,7 +18,7 @@ import { generateRecoveryCode, parseRecoveryCode } from './recovery-code';
 /**
  * Key chain, version 1 (D31):
  *
- * - password → Argon2id(salt) → HKDF → login key (sent) + password KEK
+ * - password → Argon2id(salt bound to the email) → HKDF → login key (sent) + password KEK
  * - recovery code (128 bits) → HKDF → recovery auth key (sent) + recovery KEK
  * - data key: 256 random bits, wrapped with AES-256-GCM by each KEK
  *
@@ -57,13 +64,15 @@ export interface RecoveryCredentials {
 }
 
 async function derivePasswordKeys(
+  email: string,
   password: string,
-  salt: Bytes,
+  serverSalt: Bytes,
   params: KdfParams,
 ): Promise<SplitKeys> {
   if (password.length === 0) {
     throw new CryptoError('INVALID_INPUT', 'Password is required');
   }
+  const salt = await bindSaltToEmail(email, serverSalt);
   // Argon2id runs in a disposable worker; the master key never reaches this thread.
   return derivePasswordKeysInWorker({ password: utf8(password.normalize('NFC')), salt, params });
 }
@@ -127,12 +136,13 @@ class RecoveryCredentialsHandle implements RecoveryCredentials {
 
 /** Wraps an extractable data key under a new password and returns its non-extractable copy. */
 async function setUpPassword(
+  email: string,
   password: string,
   extractableDataKey: CryptoKey,
 ): Promise<{ setup: PasswordSetup; dataKey: DataKey }> {
   const salt = randomBytes(SALT_BYTES);
   const kdf = { ...DEFAULT_KDF_PARAMS };
-  const { sentKey, kek } = await derivePasswordKeys(password, salt, kdf);
+  const { sentKey, kek } = await derivePasswordKeys(email, password, salt, kdf);
   const wrapped = await sealKey(kek, extractableDataKey, WRAP_CONTEXT.password);
   const dataKey = (await openKey(kek, wrapped, WRAP_CONTEXT.password, false)) as DataKey;
   return {
@@ -146,10 +156,14 @@ async function setUpPassword(
   };
 }
 
-async function setUpAccount(password: string, extractableDataKey: CryptoKey): Promise<AccountKeys> {
+async function setUpAccount(
+  email: string,
+  password: string,
+  extractableDataKey: CryptoKey,
+): Promise<AccountKeys> {
   const { code, secret } = await generateRecoveryCode();
   const [{ setup, dataKey }, recovery] = await Promise.all([
-    setUpPassword(password, extractableDataKey),
+    setUpPassword(email, password, extractableDataKey),
     splitKeyMaterial(secret, INFO.recoveryAuthKey, INFO.recoveryKek),
   ]);
   const recoveryWrapped = await sealKey(recovery.kek, extractableDataKey, WRAP_CONTEXT.recovery);
@@ -165,26 +179,41 @@ async function setUpAccount(password: string, extractableDataKey: CryptoKey): Pr
 }
 
 /** Registration: creates the data key, the recovery code and everything the server stores. */
-export async function createAccountKeys(password: string): Promise<AccountKeys> {
+export async function createAccountKeys({
+  email,
+  password,
+}: {
+  email: string;
+  password: string;
+}): Promise<AccountKeys> {
+  normalizeEmail(email);
   assertNewPassword(password);
   const extractableDataKey = await crypto.subtle.generateKey(
     { name: 'AES-GCM', length: 256 },
     true,
     ['encrypt', 'decrypt'],
   );
-  return setUpAccount(password, extractableDataKey);
+  return setUpAccount(email, password, extractableDataKey);
 }
 
 /**
- * Login: derives the login key from the password and the salt and parameters the server
- * returned. The parameters are validated, so a server cannot weaken them.
+ * Login: derives the login key from the email, the password and the salt and parameters the
+ * server returned. The parameters are validated, so a server cannot weaken them, and the salt
+ * is bound to the email, so a server cannot share one salt between accounts.
  */
-export async function derivePasswordCredentials(
-  password: string,
-  { salt, kdf }: { salt: string; kdf: unknown },
-): Promise<PasswordCredentials> {
+export async function derivePasswordCredentials({
+  email,
+  password,
+  salt,
+  kdf,
+}: {
+  email: string;
+  password: string;
+  salt: string;
+  kdf: unknown;
+}): Promise<PasswordCredentials> {
   assertKdfParams(kdf);
-  const { sentKey, kek } = await derivePasswordKeys(password, decodeSalt(salt), kdf);
+  const { sentKey, kek } = await derivePasswordKeys(email, password, decodeSalt(salt), kdf);
   return new PasswordCredentialsHandle(sentKey, kek);
 }
 
@@ -194,13 +223,16 @@ export async function derivePasswordCredentials(
  */
 export async function changePassword(
   current: PasswordCredentials,
-  wrappedDataKey: string,
-  newPassword: string,
+  {
+    email,
+    wrappedDataKey,
+    newPassword,
+  }: { email: string; wrappedDataKey: string; newPassword: string },
 ): Promise<{ server: PasswordSetup; dataKey: DataKey }> {
   assertNewPassword(newPassword);
   const kek = PasswordCredentialsHandle.kekOf(current);
   const extractableDataKey = await unwrap(kek, wrappedDataKey, WRAP_CONTEXT.password, true);
-  const { setup, dataKey } = await setUpPassword(newPassword, extractableDataKey);
+  const { setup, dataKey } = await setUpPassword(email, newPassword, extractableDataKey);
   return { server: setup, dataKey };
 }
 
@@ -217,8 +249,11 @@ export async function deriveRecoveryCredentials(code: string): Promise<RecoveryC
  */
 export async function recoverAccount(
   recovery: RecoveryCredentials,
-  recoveryWrappedDataKey: string,
-  newPassword: string,
+  {
+    email,
+    recoveryWrappedDataKey,
+    newPassword,
+  }: { email: string; recoveryWrappedDataKey: string; newPassword: string },
 ): Promise<AccountKeys> {
   assertNewPassword(newPassword);
   const kek = RecoveryCredentialsHandle.kekOf(recovery);
@@ -228,5 +263,5 @@ export async function recoverAccount(
   } catch {
     throw new CryptoError('INVALID_RECOVERY_CODE', 'Invalid recovery code');
   }
-  return setUpAccount(newPassword, extractableDataKey);
+  return setUpAccount(email, newPassword, extractableDataKey);
 }

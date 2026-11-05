@@ -13,6 +13,7 @@ vi.mock('libsodium-wrappers-sumo', () => {
   throw new Error('libsodium must not be loaded on the page thread');
 });
 
+const EMAIL = 'ada@example.com';
 const PASSWORD = 'correct horse battery staple';
 
 /**
@@ -62,8 +63,12 @@ describe('password key derivation on the page thread', () => {
     vi.stubGlobal('Worker', FakeArgon2Worker);
     const core = await import('./account');
 
-    const account = await core.createAccountKeys(PASSWORD);
-    const credentials = await core.derivePasswordCredentials(PASSWORD, account.server);
+    const account = await core.createAccountKeys({ email: EMAIL, password: PASSWORD });
+    const credentials = await core.derivePasswordCredentials({
+      email: EMAIL,
+      password: PASSWORD,
+      ...account.server,
+    });
     await credentials.unlockDataKey(account.server.wrappedDataKey);
 
     expect({

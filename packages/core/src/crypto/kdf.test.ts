@@ -1,4 +1,5 @@
 import { argon2id as referenceArgon2id } from '@noble/hashes/argon2.js';
+import { sha256 } from '@noble/hashes/sha2.js';
 import sodium from 'libsodium-wrappers-sumo';
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -7,10 +8,12 @@ import {
   MIN_KDF_PARAMS,
   argon2id,
   assertKdfParams,
+  bindSaltToEmail,
   deriveAesKey,
   deriveBits,
   importKeyMaterial,
   needsKdfUpgrade,
+  normalizeEmail,
   type KdfParams,
 } from './kdf';
 
@@ -252,5 +255,38 @@ describe('deriveAesKey', () => {
       algorithm: { name: 'AES-GCM', length: 256 },
       usages: ['unwrapKey', 'wrapKey'],
     });
+  });
+});
+
+describe('normalizeEmail', () => {
+  it('should trim, apply NFC and lowercase', () => {
+    expect(normalizeEmail('  Jose\u0301@Example.COM\n')).toBe('josé@example.com');
+  });
+
+  it.each(['', ' \t '])('should throw INVALID_INPUT for %j', (email) => {
+    expect(() => normalizeEmail(email)).toThrow(expect.objectContaining({ code: 'INVALID_INPUT' }));
+  });
+});
+
+describe('bindSaltToEmail', () => {
+  const serverSalt = new Uint8Array(16).map((_, index) => index);
+
+  it('should be SHA-256(tag ‖ u32be(len(email)) ‖ email ‖ server salt), first 16 bytes', async () => {
+    const tag = new TextEncoder().encode('stash/v1/argon2id-salt');
+    const email = new TextEncoder().encode('ada@example.com');
+    const expected = sha256(
+      new Uint8Array([...tag, 0, 0, 0, email.length, ...email, ...serverSalt]),
+    ).slice(0, 16);
+
+    expect(toHex(await bindSaltToEmail(' ADA@example.com', serverSalt))).toBe(toHex(expected));
+  });
+
+  it('should give different salts to different emails with the same server salt', async () => {
+    const [first, second] = await Promise.all([
+      bindSaltToEmail('ada@example.com', serverSalt),
+      bindSaltToEmail('grace@example.com', serverSalt),
+    ]);
+
+    expect(toHex(first)).not.toBe(toHex(second));
   });
 });

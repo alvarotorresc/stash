@@ -2,6 +2,7 @@ import { IDBFactory } from 'fake-indexeddb';
 import { describe, expect, it } from 'vitest';
 import * as core from '../index';
 
+const EMAIL = 'ada@example.com';
 const PASSWORD = 'correct horse battery staple';
 
 /** Collects every CryptoKey and every raw byte container reachable from a value. */
@@ -17,20 +18,24 @@ function collect(value: unknown, found = { keys: [] as CryptoKey[], bytes: [] as
 }
 
 async function everyPublicResult(): Promise<unknown[]> {
-  const account = await core.createAccountKeys(PASSWORD);
-  const credentials = await core.derivePasswordCredentials(PASSWORD, account.server);
+  const account = await core.createAccountKeys({ email: EMAIL, password: PASSWORD });
+  const credentials = await core.derivePasswordCredentials({
+    email: EMAIL,
+    password: PASSWORD,
+    ...account.server,
+  });
   const unlocked = await credentials.unlockDataKey(account.server.wrappedDataKey);
-  const changed = await core.changePassword(
-    credentials,
-    account.server.wrappedDataKey,
-    'new password',
-  );
+  const changed = await core.changePassword(credentials, {
+    email: EMAIL,
+    wrappedDataKey: account.server.wrappedDataKey,
+    newPassword: 'new password',
+  });
   const recovery = await core.deriveRecoveryCredentials(account.recoveryCode);
-  const recovered = await core.recoverAccount(
-    recovery,
-    account.server.recoveryWrappedDataKey,
-    'newer password',
-  );
+  const recovered = await core.recoverAccount(recovery, {
+    email: EMAIL,
+    recoveryWrappedDataKey: account.server.recoveryWrappedDataKey,
+    newPassword: 'newer password',
+  });
   const store = core.createIndexedDbDataKeyStore({ indexedDB: new IDBFactory() });
   await store.save(unlocked);
   const persisted = await store.load();
@@ -84,9 +89,13 @@ describe('public API', () => {
   });
 
   it('should expose only the login key from password credentials', async () => {
-    const account = await core.createAccountKeys(PASSWORD);
+    const account = await core.createAccountKeys({ email: EMAIL, password: PASSWORD });
 
-    const credentials = await core.derivePasswordCredentials(PASSWORD, account.server);
+    const credentials = await core.derivePasswordCredentials({
+      email: EMAIL,
+      password: PASSWORD,
+      ...account.server,
+    });
 
     expect(JSON.parse(JSON.stringify(credentials))).toEqual({
       loginKey: account.server.loginKey,
@@ -94,7 +103,7 @@ describe('public API', () => {
   });
 
   it('should expose only the auth key from recovery credentials', async () => {
-    const account = await core.createAccountKeys(PASSWORD);
+    const account = await core.createAccountKeys({ email: EMAIL, password: PASSWORD });
 
     const recovery = await core.deriveRecoveryCredentials(account.recoveryCode);
 
