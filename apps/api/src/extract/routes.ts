@@ -1,5 +1,5 @@
 /**
- * `POST /api/extract` (D10, D35, D36).
+ * `POST /api/extract` and `POST /api/extract/image` (D10, D35, D36).
  *
  * The proxy downloads and forgets: nothing is stored and the URL is never logged nor echoed, not
  * even in errors. The URL travels in the JSON body, never in the query string.
@@ -9,13 +9,16 @@ import { EXTRACT_MAX_URL_LENGTH, type ExtractErrorCode } from '@stash/core/extra
 import { requireSession, type Session, type SessionResolver } from '../auth/session';
 import { jsonData, jsonError } from '../http';
 import type { RateLimiter } from '../rate-limit';
+import { fetchImage } from './image';
 import { readBounded, UpstreamError, type Fetcher, type UpstreamErrorCode } from './safe-fetch';
 import { extract, type DocumentLimits } from './sources';
 import { parseAllowedTarget } from './url-guard';
 
 export const EXTRACT_PATH = '/api/extract';
+export const EXTRACT_IMAGE_PATH = '/api/extract/image';
 
 export interface ExtractLimits extends DocumentLimits {
+  maxImageBytes: number;
   maxRedirects: number;
   /** Deadline of a whole extraction, redirects and body read included. */
   timeoutMs: number;
@@ -24,6 +27,7 @@ export interface ExtractLimits extends DocumentLimits {
 export const DEFAULT_LIMITS: ExtractLimits = {
   maxDocumentBytes: 2 * 1024 * 1024,
   maxJsonBytes: 256 * 1024,
+  maxImageBytes: 5 * 1024 * 1024,
   maxRedirects: 5,
   timeoutMs: 10_000,
 };
@@ -129,12 +133,31 @@ export function createExtractRoutes(deps: ExtractDeps) {
     ),
   );
 
+  const image = requireSession(deps.resolveSession, (request, session) =>
+    guarded(request, session, async (target, signal) => {
+      const { bytes, type } = await fetchImage(
+        target,
+        { fetch: deps.fetch, signal, maxRedirects: limits.maxRedirects },
+        limits.maxImageBytes,
+      );
+      return new Response(bytes, {
+        headers: {
+          'Content-Type': type,
+          'Content-Length': String(bytes.byteLength),
+          'Cache-Control': 'no-store',
+          'X-Content-Type-Options': 'nosniff',
+          'Content-Security-Policy': "default-src 'none'; sandbox",
+        },
+      });
+    }),
+  );
+
   /** Returns null when the path is not an extraction route. */
   return async (request: Request, pathname: string): Promise<Response | null> => {
-    if (pathname !== EXTRACT_PATH) return null;
+    if (pathname !== EXTRACT_PATH && pathname !== EXTRACT_IMAGE_PATH) return null;
     if (request.method !== 'POST') {
       return jsonError('METHOD_NOT_ALLOWED', 'Method not allowed', 405, { Allow: 'POST' });
     }
-    return page(request);
+    return pathname === EXTRACT_PATH ? page(request) : image(request);
   };
 }

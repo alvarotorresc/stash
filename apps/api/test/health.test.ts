@@ -38,7 +38,7 @@ describe('unknown routes', () => {
 });
 
 describe('extraction routes in the deployed worker', () => {
-  it.each(['/api/extract'])(
+  it.each(['/api/extract', '/api/extract/image'])(
     'should fail closed with 401 on %s while sessions do not exist',
     async (path) => {
       const res = await exports.default.fetch(`${BASE_URL}${path}`, {
