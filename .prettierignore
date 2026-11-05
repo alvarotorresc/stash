@@ -1,0 +1,13 @@
+# Local notes outside the repository (symlinks)
+/docs
+/design
+
+pnpm-lock.yaml
+LICENSE
+node_modules/
+dist/
+dev-dist/
+.output/
+.wxt/
+coverage/
+.wrangler/
