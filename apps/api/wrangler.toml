@@ -13,6 +13,10 @@ preview_urls = false
 
 routes = [{ pattern = "stash.alvarotc.com", custom_domain = true }]
 
+# Daily sweep of expired sessions and rate limit windows, off the request path.
+[triggers]
+crons = ["17 4 * * *"]
+
 # The same Worker serves the PWA; only /api/* runs the Worker code.
 [assets]
 directory = "../pwa/dist"

@@ -40,7 +40,19 @@ pnpm install
 
 ### Environment variables
 
-None yet. See `.env.example`.
+See `.env.example`. The Worker needs one secret, `PEPPER`:
+
+- Local development and tests: put `PEPPER=<random value>` in `apps/api/.dev.vars` (ignored by
+  git). The tests set their own value.
+- Production: `pnpm --filter @stash/api exec wrangler secret put PEPPER`, with a value from
+  `openssl rand -base64 48`. Without it, every account route answers 500.
+- The pepper cannot be rotated yet (see `apps/api/README.md`): keep it.
+
+### Database
+
+D1 migrations live in `apps/api/migrations`. The tests apply them to a local database
+automatically. Apply them locally with
+`pnpm --filter @stash/api exec wrangler d1 migrations apply stash --local`.
 
 ## Scripts
 

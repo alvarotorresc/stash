@@ -46,6 +46,7 @@ async function everyPublicResult(): Promise<unknown[]> {
 describe('public API', () => {
   it('should export only the intended functions and values', () => {
     expect(Object.keys(core).sort()).toEqual([
+      'AccountApiError',
       'CryptoError',
       'DATA_KEY_TTL_MS',
       'DEFAULT_KDF_PARAMS',
@@ -54,8 +55,11 @@ describe('public API', () => {
       'changePassword',
       'checkPassword',
       'constantTimeEqual',
+      'createAccountClient',
       'createAccountKeys',
       'createIndexedDbDataKeyStore',
+      'createMemorySessionStore',
+      'createWebStorageSessionStore',
       'decryptRecord',
       'derivePasswordCredentials',
       'deriveRecoveryCredentials',

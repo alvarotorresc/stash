@@ -6,7 +6,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./extract": "./src/extract.ts"
+    "./extract": "./src/extract.ts",
+    "./protocol": "./src/account/protocol.ts"
   },
   "scripts": {
     "typecheck": "tsc",
