@@ -3,6 +3,9 @@ import { VitePWA } from 'vite-plugin-pwa';
 import { defineConfig } from 'vite';
 
 export default defineConfig({
+  // In development the API runs apart (`pnpm --filter @stash/api dev`); in
+  // production the same Worker serves the app and /api on one origin.
+  server: { proxy: { '/api': 'http://localhost:8787' } },
   plugins: [
     svelte(),
     VitePWA({

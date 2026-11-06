@@ -3,17 +3,39 @@
 The Stash progressive web app: Svelte 5 + Vite, with a service worker built by vite-plugin-pwa in
 `injectManifest` mode (`src/sw.ts`). On Android it receives links from the system share sheet.
 
-Until the real client exists, the app runs on example data in memory (`src/lib/mock`).
+The screens talk to one interface, `StashService` (`src/lib/service.ts`). The app runs on the real
+service (`src/lib/real`), built on `@stash/client`: accounts, end-to-end encryption, the encrypted
+cache, sync, the extraction proxy and the reader on the device. The in-memory example service
+(`src/lib/mock`) is only for tests and, in development, with `VITE_STASH_MOCK=1`. Production builds
+never include it.
+
+### Session and keys
+
+- The session token lives in `localStorage` (`createWebStorageSessionStore`), so the app stays
+  signed in across reloads. The data key is a non-extractable `CryptoKey`, kept in memory once
+  unlocked and remembered by the core's IndexedDB store for 30 days from the last password entry:
+  opening the app unlocks it without the password. Both rely on no foreign script running, which
+  the strict CSP in `public/_headers` enforces.
+- Logging out or deleting the account forgets the data key, the session, the encrypted cache and
+  the offline queue. If the server closes the session (password changed on another device), the
+  app goes back to the sign-in screen with the email filled in and keeps the queue for the next
+  login.
+- Saved content is shown as text, or as HTML passed through `sanitizeStoredHtml` right before it
+  is rendered. Images from saved pages never load from their site.
 
 ## Scripts
 
 | Command          | Description                                          |
 | ---------------- | ---------------------------------------------------- |
-| `pnpm dev`       | Development server (add `?lento` to slow the mock)   |
+| `pnpm dev`       | Development server; `/api` goes to `wrangler dev`    |
 | `pnpm build`     | Production build in `dist/`, service worker included |
 | `pnpm preview`   | Serves the build locally                             |
 | `pnpm typecheck` | svelte-check for the app, tsc for the worker         |
 | `pnpm test`      | Vitest with coverage (85 % threshold)                |
+
+In development, run the API with `pnpm --filter @stash/api dev` (port 8787) next to `pnpm dev`.
+To work on the screens without it, start with `VITE_STASH_MOCK=1 pnpm dev` (add `?lento` to the
+URL to slow the example data down).
 
 ## How sharing works
 
@@ -25,9 +47,11 @@ Until the real client exists, the app runs on example data in memory (`src/lib/m
    that is not a form) redirects to `/` with nothing.
 3. The service worker serves the cached app for `/?share=…`, so the shared link never reaches the
    server, and sharing works offline.
-4. The app validates the link again, cleans the address bar and saves it at once. The sheet that
-   opens only offers to classify; closing it without touching anything leaves the item under
-   «Sin clasificar».
+4. The app validates the link again, cleans the address bar and saves it at once, then asks the
+   proxy for the page and reads it on the device in the background. The sheet that opens only
+   offers to classify; closing it without touching anything leaves the item under
+   «Sin clasificar». Without connection (or if the server fails) the link waits in the encrypted
+   queue and uploads when the connection is back.
 
 Security headers (CSP, `Referrer-Policy`, `nosniff`, HSTS) live in `public/_headers`, which Cloudflare
 Pages applies to every path.
@@ -45,8 +69,7 @@ Android supports it. Firefox for Android ignores `share_target`.
    app, so the preview and production can coexist.
 3. If an older install exists without sharing, uninstall it and install again: Android picks up
    manifest changes slowly.
-4. Open the app once from the home screen, then close it. With the mock it starts signed in, on
-   example data that resets every time the app opens.
+4. Open the app once from the home screen, sign in (or create the account), then close it.
 5. Share from each app and check that Stash opens with the sheet «Guardado» and the right link:
 
    | App       | How to share                   | What it usually sends  |
