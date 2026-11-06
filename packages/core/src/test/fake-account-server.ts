@@ -80,7 +80,8 @@ export class FakeServer {
       case `POST ${API_PATHS.prelogin}`:
         return this.data({ salt: named?.keys.salt, kdf: named?.keys.kdf });
       case `POST ${API_PATHS.login}`:
-        if (named?.keys.loginKey !== body.loginKey) return this.error(401, 'INVALID_CREDENTIALS');
+        if (named === undefined || named.keys.loginKey !== body.loginKey)
+          return this.error(401, 'INVALID_CREDENTIALS');
         return this.data({ session: this.open(email), wrappedDataKey: named.keys.wrappedDataKey });
       case `POST ${API_PATHS.logout}`:
         if (call.token === null || !this.sessions.delete(call.token)) {
@@ -99,7 +100,7 @@ export class FakeServer {
         return this.data({ ok: true });
       case `POST ${API_PATHS.recoveryStart}`:
       case `POST ${API_PATHS.recoveryComplete}`: {
-        if (named?.keys.recoveryAuthKey !== body.recoveryAuthKey) {
+        if (named === undefined || named.keys.recoveryAuthKey !== body.recoveryAuthKey) {
           return this.error(401, 'INVALID_CREDENTIALS');
         }
         if (call.path === API_PATHS.recoveryStart) {
