@@ -3,7 +3,7 @@ import { jsonData, jsonError } from '../http';
 import { readPepper, type AccountsEnv } from './env';
 import { ApiError, unauthorized, validationError } from './errors';
 import { NO_MATCH_DIGEST, digestsMatch, fakeSalt, hashKey } from './hashing';
-import { accountCounterKeys, clientIp, enforceRateLimit } from './rate-limit';
+import { accountCounterKeys, clientIp, enforceRateLimit, recordFailure } from './rate-limit';
 import { newSession, resolveSessionFromRequest, type Session } from './sessions';
 import {
   DELETE_ACCOUNT_STATEMENTS,
@@ -117,11 +117,10 @@ async function register(context: Context): Promise<Response> {
 }
 
 async function prelogin(context: Context): Promise<Response> {
-  const { request, db, pepper, now } = context;
+  const { request, db, pepper } = context;
   const address = email((await readJsonBody(request)).email);
-  await enforceRateLimit(db, pepper, 'prelogin', { ip: clientIp(request) }, now);
 
-  // The fake salt is computed on both paths so an unknown email takes the same work.
+  // Not counted in D1: it costs reads only and protects no secret. The fake salt is computed on both paths so an unknown email takes the same work.
   const [user, fake] = await Promise.all([findUserByEmail(db, address), fakeSalt(pepper, address)]);
   const kdf: KdfParams = user === null ? { ...DEFAULT_KDF_PARAMS } : kdfOf(user);
   return jsonData({ salt: user?.salt ?? fake, kdf });
@@ -132,14 +131,22 @@ async function login(context: Context): Promise<Response> {
   const body = await readJsonBody(request);
   const address = email(body.email);
   const loginKey = sentKey(body.loginKey, 'loginKey');
-  await enforceRateLimit(db, pepper, 'login', { ip: clientIp(request), email: address }, now);
+  const subjects = { ip: clientIp(request), email: address };
+  await enforceRateLimit(db, pepper, 'login', subjects, now);
 
   const user = await findUserByEmail(db, address);
   if (!(await keyMatches(pepper, 'login-key', user?.login_key_hash, loginKey)) || user === null) {
+    await recordFailure(db, pepper, 'login', subjects, now);
     throw invalidCredentials('Wrong email or password', 401);
   }
-  const session = await newSession(db, pepper, user.id, now);
-  await db.batch(session.statements);
+  // Only stored if the login key is still the one checked: a password change or recovery that
+  // commits meanwhile closes every session, and this one must not slip in after it.
+  const session = await newSession(db, pepper, user.id, now, {
+    sql: 'EXISTS (SELECT 1 FROM users WHERE id = ? AND login_key_hash = ?)',
+    params: [user.id, user.login_key_hash],
+  });
+  const [stored] = await db.batch(session.statements);
+  if (stored?.meta.changes !== 1) throw invalidCredentials('Wrong email or password', 401);
   return jsonData({ session: session.grant, wrappedDataKey: user.wrapped_data_key });
 }
 
@@ -158,26 +165,35 @@ async function getAccount(context: Context): Promise<Response> {
     email: user.email,
     salt: user.salt,
     kdf: kdfOf(user),
-    wrappedDataKey: user.wrapped_data_key,
     createdAt: user.created_at,
   });
 }
 
 /**
+ * First step of a password change: the wrapped data key, only after the current login key is
+ * proven, as on login. A session token alone never gets it, so a stolen token is no oracle for
+ * guessing the password offline.
+ */
+async function beginPasswordChange(context: Context): Promise<Response> {
+  const { request, db, pepper, now } = context;
+  const session = await requireSession(context);
+  const currentLoginKey = sentKey((await readJsonBody(request)).currentLoginKey, 'currentLoginKey');
+  await enforceRateLimit(db, pepper, 'proof', { account: session.userId }, now);
+
+  const user = await requireUser(context, session);
+  await proveLoginKey(context, user, currentLoginKey);
+  return jsonData({ wrappedDataKey: user.wrapped_data_key });
+}
+
+/**
  * Replaces the password setup, proven with the current login key. The update only applies if
  * the stored digest is still the one that was checked, so two concurrent changes cannot both
- * win. With `revokeOtherSessions`, every other session of the account is closed in the same
- * transaction, and only when the update applied.
+ * win. Every other session of the account is closed in the same transaction, and only when the
+ * update applied.
  */
 async function replacePassword(
   context: Context,
-  {
-    revokeOtherSessions,
-    check,
-  }: {
-    revokeOtherSessions: boolean;
-    check?: (user: UserRow, keys: ParsedPasswordSetup) => void;
-  },
+  check?: (user: UserRow, keys: ParsedPasswordSetup) => void,
 ): Promise<Response> {
   const { request, db, pepper, now } = context;
   const session = await requireSession(context);
@@ -191,7 +207,7 @@ async function replacePassword(
   await proveLoginKey(context, user, currentLoginKey);
 
   const newHash = await hashKey(pepper, 'login-key', keys.loginKey);
-  const statements = [
+  const [update] = await db.batch([
     db
       .prepare(
         `UPDATE users SET salt = ?, kdf_memory_kib = ?, kdf_iterations = ?, login_key_hash = ?,
@@ -208,43 +224,36 @@ async function replacePassword(
         user.id,
         user.login_key_hash,
       ),
-  ];
-  if (revokeOtherSessions) {
-    statements.push(
-      db
-        .prepare(
-          `DELETE FROM sessions WHERE user_id = ?1 AND token_hash != ?2
-             AND EXISTS (SELECT 1 FROM users WHERE id = ?1 AND login_key_hash = ?3)`,
-        )
-        .bind(user.id, session.tokenHash, newHash),
-    );
-  }
-  const [update] = await db.batch(statements);
+    db
+      .prepare(
+        `DELETE FROM sessions WHERE user_id = ?1 AND token_hash != ?2
+           AND EXISTS (SELECT 1 FROM users WHERE id = ?1 AND login_key_hash = ?3)`,
+      )
+      .bind(user.id, session.tokenHash, newHash),
+  ]);
   if (update?.meta.changes !== 1) throw invalidCredentials('Wrong password', 403);
   return jsonData({ ok: true });
 }
 
 /** Password change: closes every other session of the account. */
 function changePassword(context: Context): Promise<Response> {
-  return replacePassword(context, { revokeOtherSessions: true });
+  return replacePassword(context);
 }
 
 /**
  * Argon2id parameter upgrade right after a login: same password, new salt and stronger
- * parameters. It must be strictly stronger, so this route cannot stand in for a password change
- * that keeps the other sessions open.
+ * parameters. The server cannot check that the new keys come from the same password, so with
+ * the current password this route could set a new one. It therefore closes every other session
+ * like a password change: whatever it is used for, it never leaves another device logged in.
  */
 function upgradeKdf(context: Context): Promise<Response> {
-  return replacePassword(context, {
-    revokeOtherSessions: false,
-    check(user, { kdf }) {
-      const current = kdfOf(user);
-      const notWeaker = kdf.memoryKiB >= current.memoryKiB && kdf.iterations >= current.iterations;
-      const stronger = kdf.memoryKiB > current.memoryKiB || kdf.iterations > current.iterations;
-      if (!notWeaker || !stronger) {
-        throw validationError('kdf must be stronger than the current parameters');
-      }
-    },
+  return replacePassword(context, (user, { kdf }) => {
+    const current = kdfOf(user);
+    const notWeaker = kdf.memoryKiB >= current.memoryKiB && kdf.iterations >= current.iterations;
+    const stronger = kdf.memoryKiB > current.memoryKiB || kdf.iterations > current.iterations;
+    if (!notWeaker || !stronger) {
+      throw validationError('kdf must be stronger than the current parameters');
+    }
   });
 }
 
@@ -253,13 +262,15 @@ async function recoveryUser(context: Context, body: Record<string, unknown>): Pr
   const { request, db, pepper, now } = context;
   const address = email(body.email);
   const recoveryAuthKey = sentKey(body.recoveryAuthKey, 'recoveryAuthKey');
-  await enforceRateLimit(db, pepper, 'recovery', { ip: clientIp(request), email: address }, now);
+  const subjects = { ip: clientIp(request), email: address };
+  await enforceRateLimit(db, pepper, 'recovery', subjects, now);
 
   const user = await findUserByEmail(db, address);
   if (
     !(await keyMatches(pepper, 'recovery-key', user?.recovery_key_hash, recoveryAuthKey)) ||
     user === null
   ) {
+    await recordFailure(db, pepper, 'recovery', subjects, now);
     throw invalidCredentials('Wrong email or recovery code', 401);
   }
   return user;
@@ -330,7 +341,7 @@ async function deleteAccount(context: Context): Promise<Response> {
 
   const user = await requireUser(context, session);
   await proveLoginKey(context, user, loginKey);
-  const counters = await accountCounterKeys(pepper, user.id);
+  const counters = await accountCounterKeys(pepper, user.id, user.email);
   await db.batch([
     ...DELETE_ACCOUNT_STATEMENTS.map((sql) => db.prepare(sql).bind(user.id)),
     ...counters.map((key) => db.prepare('DELETE FROM rate_limits WHERE key = ?').bind(key)),
@@ -347,6 +358,7 @@ const ROUTES: Record<string, Partial<Record<Method, Handler>>> = {
   [API_PATHS.recoveryComplete]: { POST: completeRecovery },
   [API_PATHS.account]: { GET: getAccount, DELETE: deleteAccount },
   [API_PATHS.password]: { PUT: changePassword },
+  [API_PATHS.passwordBegin]: { POST: beginPasswordChange },
   [API_PATHS.kdf]: { PUT: upgradeKdf },
 };
 

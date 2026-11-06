@@ -18,8 +18,16 @@ export const MAX_BODY_BYTES = 4096;
 
 type Json = Record<string, unknown>;
 
-/** Reads a JSON object body of at most `MAX_BODY_BYTES`, streaming and stopping at the limit. */
+/**
+ * Reads a JSON object body of at most `MAX_BODY_BYTES`, streaming and stopping at the limit.
+ * The body must be declared `application/json`: any other type, `text/plain` above all, would
+ * let another site's page send the request without a CORS preflight. Every route checks this
+ * before counting the request, so a refused body costs no write.
+ */
 export async function readJsonBody(request: Request): Promise<Json> {
+  if (!/^application\/json\s*(;|$)/i.test(request.headers.get('content-type') ?? '')) {
+    throw new ApiError('UNSUPPORTED_MEDIA_TYPE', 'The body must be JSON', 415);
+  }
   let bytes: Uint8Array;
   try {
     ({ bytes } = await readBounded(

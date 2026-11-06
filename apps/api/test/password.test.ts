@@ -4,8 +4,10 @@ import {
   DEFAULT_KDF_PARAMS,
   type AccountResponse,
   type KdfParams,
+  type PasswordBeginResponse,
 } from '@stash/core/protocol';
 import { describe, expect, it } from 'vitest';
+import { LIMITS } from '../src/accounts/rate-limit';
 import {
   accountSetup,
   call,
@@ -17,6 +19,10 @@ import {
   register,
 } from './helpers';
 
+function begin(token: string, currentLoginKey: string) {
+  return call(API_PATHS.passwordBegin, { token, body: { currentLoginKey } });
+}
+
 function replace(path: string, token: string, currentLoginKey: string, keys: object) {
   return call(path, { method: 'PUT', token, body: { currentLoginKey, keys } });
 }
@@ -25,6 +31,60 @@ function loginStatus(email: string, loginKey: string): Promise<number> {
   return call(API_PATHS.login, { body: { email, loginKey } }).then((res) => res.status);
 }
 
+describe('GET /api/account', () => {
+  it('should never hand out the wrapped data key to a bare token', async () => {
+    const { token } = await register();
+
+    const me = await dataOf<Record<string, unknown>>(await call(API_PATHS.account, { token }));
+
+    expect(Object.keys(me).sort()).toEqual(['createdAt', 'email', 'kdf', 'salt']);
+  });
+});
+
+describe('POST /api/account/password/begin', () => {
+  it('should return the wrapped data key once the current login key is proven', async () => {
+    const { keys, token } = await register();
+
+    const data = await dataOf<PasswordBeginResponse>(await begin(token, keys.loginKey));
+
+    expect(data).toEqual({ wrappedDataKey: keys.wrappedDataKey });
+  });
+
+  it('should answer 403 INVALID_CREDENTIALS for a wrong current login key', async () => {
+    const { token } = await register();
+
+    expect(await errorOf(await begin(token, randomKey()))).toEqual({
+      status: 403,
+      code: 'INVALID_CREDENTIALS',
+    });
+  });
+
+  it("should not accept another account's key", async () => {
+    const a = await register();
+    const b = await register();
+
+    expect((await begin(a.token, b.keys.loginKey)).status).toBe(403);
+  });
+
+  it('should answer 401 without a session', async () => {
+    const { keys } = await register();
+
+    const res = await call(API_PATHS.passwordBegin, { body: { currentLoginKey: keys.loginKey } });
+
+    expect(res.status).toBe(401);
+  });
+
+  it('should count every proof against the account, so guesses stop at the limit', async () => {
+    const { keys, token } = await register();
+    for (let i = 0; i < LIMITS.proof.account.max; i++) await begin(token, randomKey());
+
+    expect(await errorOf(await begin(token, keys.loginKey))).toEqual({
+      status: 429,
+      code: 'RATE_LIMITED',
+    });
+  });
+});
+
 describe('PUT /api/account/password', () => {
   it('should replace the password setup and switch the login key', async () => {
     const { email, keys, token } = await register();
@@ -32,10 +92,11 @@ describe('PUT /api/account/password', () => {
 
     await dataOf(await replace(API_PATHS.password, token, keys.loginKey, next));
     const me = await dataOf<AccountResponse>(await call(API_PATHS.account, { token }));
+    const proven = await dataOf<PasswordBeginResponse>(await begin(token, next.loginKey));
 
     expect({
       salt: me.salt,
-      wrapped: me.wrappedDataKey,
+      wrapped: proven.wrappedDataKey,
       newLogin: await loginStatus(email, next.loginKey),
       oldLogin: await loginStatus(email, keys.loginKey),
     }).toEqual({ salt: next.salt, wrapped: next.wrappedDataKey, newLogin: 200, oldLogin: 401 });
@@ -126,7 +187,7 @@ describe('PUT /api/account/kdf', () => {
     iterations: DEFAULT_KDF_PARAMS.iterations + 1,
   };
 
-  it('should accept stronger parameters and keep every session open', async () => {
+  it('should accept stronger parameters and close every other session', async () => {
     const { email, keys, token } = await register();
     const other = await login(email, keys.loginKey);
     const upgrade = passwordSetup(STRONGER);
@@ -137,7 +198,7 @@ describe('PUT /api/account/kdf', () => {
       kdf: (await dataOf<AccountResponse>(await call(API_PATHS.account, { token }))).kdf,
       other: (await call(API_PATHS.account, { token: other })).status,
       login: await loginStatus(email, upgrade.loginKey),
-    }).toEqual({ kdf: STRONGER, other: 200, login: 200 });
+    }).toEqual({ kdf: STRONGER, other: 401, login: 200 });
   });
 
   it.each([

@@ -65,7 +65,9 @@ Errors are `CryptoError` with a `code`: `CREDENTIALS_USED`, `DECRYPTION_FAILED`,
   hostile server from making a phone hang.
 - **Upgrades.** When an account logs in with parameters below the current defaults,
   `unlockDataKey` also returns `upgrade`: the same password under a new salt and the defaults,
-  with the data key re-wrapped. Send it to the server in the session that just logged in.
+  with the data key re-wrapped. Send it to the server in the session that just logged in. The
+  server cannot tell an upgrade from a password change, so it closes the account's other
+  sessions as a change does: raising the defaults logs every other device out once.
 - **Salt bound to the email.** The Argon2id salt is
   `SHA-256("stash/v1/argon2id-salt" ‖ u32be(len(email)) ‖ email ‖ serverSalt)[0..16]`, with the
   email trimmed, NFC-normalised and lowercased. A server cannot make several accounts share a
@@ -76,7 +78,10 @@ Errors are `CryptoError` with a `code`: `CREDENTIALS_USED`, `DECRYPTION_FAILED`,
 Password and recovery credentials are single use: `unlockDataKey` and `recoverAccount` consume
 them and a second call throws `CREDENTIALS_USED`. Do not keep them in long-lived state.
 `changePassword` takes the current password, not credentials, so nothing left over from a login
-can re-wrap the data key under a password someone else chooses.
+can re-wrap the data key under a password someone else chooses. The account client changes the
+password in two steps with the same guarantee: the current password's keys give
+`currentLoginKey`, which the server must accept before it hands out the wrapped data key, and the
+single-use handle then re-wraps it.
 
 ### Remembered data key
 
@@ -111,16 +116,27 @@ key chain with the account API. It never stores or sends the password.
 | `register({ email, password })`                    | Creates the account and logs in. Returns the recovery code to show once.                          |
 | `login({ email, password })`                       | Two steps: salt and parameters, then the login key. Sends the Argon2id upgrade when there is one. |
 | `logout()`                                         | Closes the session on the server when it can, then always clears the data key, session and cache. |
-| `changePassword({ currentPassword, newPassword })` | Re-wraps the data key; the server closes the other sessions.                                      |
+| `changePassword({ currentPassword, newPassword })` | Proves the current password to get the wrapped data key, re-wraps it; other sessions are closed.  |
 | `recover({ email, recoveryCode, newPassword })`    | Sets a new password and recovery code; the server closes every session.                           |
-| `deleteAccount({ password })`                      | Proves the password, deletes the account and clears everything local.                             |
+| `deleteAccount({ password })`                      | Proves the password, deletes the account and clears everything local, also on `UNAUTHORIZED`.     |
 | `getSession()`                                     | The stored session, or `null` when there is none or it expired.                                   |
 
 - Every password entry saves the data key with `afterPasswordEntry: true`.
 - `onLogout` runs after logout and account deletion so the local record cache can wipe itself.
 - Sessions live in a `SessionStore`: `createMemorySessionStore()`, or
   `createWebStorageSessionStore(localStorage)`. A script running on the origin can read the token
-  in Web Storage, just as it can use the remembered data key.
+  in Web Storage, just as it can use the remembered data key, and use it from anywhere until it
+  expires (30 days) or the user logs out, which deletes it on the server. The email is kept in
+  clear next to it. IndexedDB would not change that. The defence is not letting foreign script
+  run, which the app must treat as a requirement:
+  - a strict CSP with no `unsafe-inline` or `unsafe-eval`: `script-src 'self' 'wasm-unsafe-eval'`
+    (see CSP above), `object-src 'none'`, `base-uri 'none'`, `frame-ancestors 'none'`;
+  - no HTML from saved pages rendered unsanitised: extracted content goes through a sanitiser
+    (Trusted Types where available) and never into `innerHTML` as is.
+
+  Where keeping the session across reloads is not worth the risk, `createMemorySessionStore()` is
+  the drop-in alternative: nothing is persisted and the user logs in on every visit.
+
 - Failures are `AccountApiError` with the server's `code` (`INVALID_CREDENTIALS`,
   `RATE_LIMITED` with `retryAfter`, `UNAUTHORIZED`...), `NETWORK_ERROR` or `BAD_RESPONSE`.
 - The wire contract is exported without any cryptography from `@stash/core/protocol`, which is

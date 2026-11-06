@@ -34,11 +34,13 @@ export const API_PATHS = {
   recoveryComplete: '/api/auth/recovery/complete',
   account: '/api/account',
   password: '/api/account/password',
+  passwordBegin: '/api/account/password/begin',
   kdf: '/api/account/kdf',
 } as const;
 
 /** Error codes the account API returns in `{ error: { code } }`. */
 export type AccountErrorCode =
+  | 'CROSS_SITE_REQUEST'
   | 'EMAIL_TAKEN'
   | 'INTERNAL_ERROR'
   | 'INVALID_CREDENTIALS'
@@ -47,6 +49,7 @@ export type AccountErrorCode =
   | 'PAYLOAD_TOO_LARGE'
   | 'RATE_LIMITED'
   | 'UNAUTHORIZED'
+  | 'UNSUPPORTED_MEDIA_TYPE'
   | 'VALIDATION_ERROR';
 
 /** An opaque bearer token and when it stops working (Unix time in milliseconds). */
@@ -82,12 +85,23 @@ export interface LoginResponse {
   readonly wrappedDataKey: string;
 }
 
+/**
+ * What a session token alone can read. Never the wrapped data key: with it, whoever holds a
+ * stolen token could try passwords offline, with no rate limit.
+ */
 export interface AccountResponse {
   readonly email: string;
   readonly salt: string;
   readonly kdf: KdfParams;
-  readonly wrappedDataKey: string;
   readonly createdAt: number;
+}
+
+/** First step of a password change: proves the current password to get the wrapped data key. */
+export interface PasswordBeginRequest {
+  readonly currentLoginKey: string;
+}
+export interface PasswordBeginResponse {
+  readonly wrappedDataKey: string;
 }
 
 /** Password change and Argon2id parameter upgrade: proven with the current login key. */

@@ -90,7 +90,17 @@ export class FakeServer {
         return this.data({ ok: true });
       case `GET ${API_PATHS.account}`:
         if (user === undefined) return this.error(401, 'UNAUTHORIZED');
-        return this.data({ email: user.email, createdAt: 0, ...user.keys });
+        return this.data({
+          email: user.email,
+          salt: user.keys.salt,
+          kdf: user.keys.kdf,
+          createdAt: 0,
+        });
+      case `POST ${API_PATHS.passwordBegin}`:
+        if (user === undefined) return this.error(401, 'UNAUTHORIZED');
+        if (user.keys.loginKey !== body.currentLoginKey)
+          return this.error(403, 'INVALID_CREDENTIALS');
+        return this.data({ wrappedDataKey: user.keys.wrappedDataKey });
       case `PUT ${API_PATHS.password}`:
       case `PUT ${API_PATHS.kdf}`:
         if (user === undefined) return this.error(401, 'UNAUTHORIZED');

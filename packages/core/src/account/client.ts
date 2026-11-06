@@ -1,5 +1,5 @@
 import {
-  changePassword as rewrapUnderNewPassword,
+  beginPasswordChange,
   createAccountKeys,
   derivePasswordCredentials,
   deriveRecoveryCredentials,
@@ -13,6 +13,7 @@ import {
   type AccountResponse,
   type LoginResponse,
   type OkResponse,
+  type PasswordBeginResponse,
   type PreloginResponse,
   type RecoveryCompleteResponse,
   type RecoveryStartResponse,
@@ -59,7 +60,11 @@ export interface AccountClient {
     recoveryCode: string;
     newPassword: string;
   }): Promise<{ recoveryCode: string; dataKey: DataKey }>;
-  /** Deletes the account after proving the password, then forgets everything local. */
+  /**
+   * Deletes the account after proving the password, then forgets everything local. It also
+   * forgets everything when the server answers that there is no session (the account may be
+   * gone already), and still throws `UNAUTHORIZED` so the app can say so.
+   */
   deleteAccount(input: { password: string }): Promise<void>;
   /** The current session, or null when there is none or it has expired. */
   getSession(): Promise<StoredSession | null>;
@@ -157,8 +162,9 @@ export function createAccountClient(options: AccountClientOptions): AccountClien
     },
 
     async logout() {
-      const session = await sessionStore.load();
       try {
+        // Inside the try: a storage that cannot be read must not keep the local data alive.
+        const session = await sessionStore.load();
         if (session !== null) {
           await api<OkResponse>({ method: 'POST', path: API_PATHS.logout, token: session.token });
         }
@@ -173,22 +179,30 @@ export function createAccountClient(options: AccountClientOptions): AccountClien
     async changePassword({ currentPassword, newPassword }) {
       const token = await requireToken();
       const account = await getAccount(token);
-      const result = await rewrapUnderNewPassword({
+      const change = await beginPasswordChange({
         email: account.email,
         currentPassword,
         newPassword,
         salt: account.salt,
         kdf: account.kdf,
-        wrappedDataKey: account.wrappedDataKey,
       });
+      // The wrapped data key is only handed out against proof of the current password.
+      const { currentLoginKey } = change;
+      const { wrappedDataKey } = await api<PasswordBeginResponse>({
+        method: 'POST',
+        path: API_PATHS.passwordBegin,
+        token,
+        body: { currentLoginKey },
+      });
+      const { server, dataKey } = await change.rewrap(wrappedDataKey);
       await api<OkResponse>({
         method: 'PUT',
         path: API_PATHS.password,
         token,
-        body: { currentLoginKey: result.currentLoginKey, keys: result.server },
+        body: { currentLoginKey, keys: server },
       });
-      await dataKeyStore.save(result.dataKey, { afterPasswordEntry: true });
-      return { dataKey: result.dataKey };
+      await dataKeyStore.save(dataKey, { afterPasswordEntry: true });
+      return { dataKey };
     },
 
     async recover({ email, recoveryCode, newPassword }) {
@@ -210,20 +224,28 @@ export function createAccountClient(options: AccountClientOptions): AccountClien
     },
 
     async deleteAccount({ password }) {
-      const token = await requireToken();
-      const account = await getAccount(token);
-      const { loginKey } = await derivePasswordCredentials({
-        email: account.email,
-        password,
-        salt: account.salt,
-        kdf: account.kdf,
-      });
-      await api<OkResponse>({
-        method: 'DELETE',
-        path: API_PATHS.account,
-        token,
-        body: { loginKey },
-      });
+      try {
+        const token = await requireToken();
+        const account = await getAccount(token);
+        const { loginKey } = await derivePasswordCredentials({
+          email: account.email,
+          password,
+          salt: account.salt,
+          kdf: account.kdf,
+        });
+        await api<OkResponse>({
+          method: 'DELETE',
+          path: API_PATHS.account,
+          token,
+          body: { loginKey },
+        });
+      } catch (error) {
+        // No session: the account may already be gone (a deletion whose answer was lost, then
+        // retried) or the session expired. Either way the user asked to leave, so nothing local
+        // is kept. A wrong password (INVALID_CREDENTIALS) keeps everything.
+        if (error instanceof AccountApiError && error.code === 'UNAUTHORIZED') await forgetLocal();
+        throw error;
+      }
       await forgetLocal();
     },
 

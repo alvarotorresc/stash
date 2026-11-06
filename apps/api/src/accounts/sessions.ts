@@ -6,7 +6,6 @@ import {
 } from '@stash/core/protocol';
 import { readPepper, type AccountsEnv } from './env';
 import { hashKey } from './hashing';
-import { LONGEST_WINDOW_MS } from './rate-limit';
 
 /**
  * Sessions last 30 days from the login, password change or recovery that created them and are
@@ -27,7 +26,7 @@ export interface Session {
 
 export interface NewSession {
   readonly grant: SessionGrant;
-  /** Statements that store the session (and sweep dead rows); run them in a batch. */
+  /** Statements that store the session; run them in a batch. */
   readonly statements: D1PreparedStatement[];
 }
 
@@ -61,12 +60,7 @@ export async function newSession(
           .bind(...values, ...onlyIf.params);
   return {
     grant: { token: toBase64Url(token), expiresAt },
-    statements: [
-      insert,
-      // Housekeeping on every new session: expired sessions and dead rate limit windows.
-      db.prepare('DELETE FROM sessions WHERE expires_at <= ?').bind(now),
-      db.prepare('DELETE FROM rate_limits WHERE window_start <= ?').bind(now - LONGEST_WINDOW_MS),
-    ],
+    statements: [insert],
   };
 }
 

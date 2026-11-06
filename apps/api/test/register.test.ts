@@ -16,13 +16,11 @@ describe('POST /api/auth/register', () => {
       email: me.email,
       salt: me.salt,
       kdf: me.kdf,
-      wrappedDataKey: me.wrappedDataKey,
       ttlDays: (account.session.expiresAt - me.createdAt) / 86_400_000,
     }).toEqual({
       email: account.email,
       salt: account.keys.salt,
       kdf: account.keys.kdf,
-      wrappedDataKey: account.keys.wrappedDataKey,
       ttlDays: 30,
     });
   });
