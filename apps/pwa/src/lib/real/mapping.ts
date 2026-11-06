@@ -11,9 +11,28 @@ const WORDS_PER_MINUTE = 200;
 
 const host = (url: URL) => url.hostname.replace(/^www\./, '');
 
+/** The link as an http(s) URL, or null: only those may become an `href`. */
+function webUrl(value: string): URL | null {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The link to open. Saving only accepts http(s), but records also arrive from other
+ * devices of the account: anything else never reaches an `href`.
+ */
+export function safeHref(value: string): string {
+  return webUrl(value)?.href ?? 'about:blank';
+}
+
 /** Domain, subreddit or account, for example "r/askspain" or "@ana". */
 export function originOf(item: Pick<ItemView, 'url' | 'source'>): string {
-  const url = new URL(item.url);
+  const url = webUrl(item.url);
+  if (!url) return '';
   const [first, second] = url.pathname.split('/').filter(Boolean);
   if (item.source === 'reddit' && first === 'r' && second) return `r/${second}`;
   if (item.source === 'x' && first && first !== 'i') return `@${first}`;
@@ -30,7 +49,7 @@ export function toneOf(id: string): Tone {
 export function toItem(view: ItemView, thumbnail?: string): Item {
   return {
     id: view.id,
-    url: view.url,
+    url: safeHref(view.url),
     title: view.title,
     source: view.source,
     origin: originOf(view),

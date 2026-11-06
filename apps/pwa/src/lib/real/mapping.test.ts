@@ -4,6 +4,7 @@ import {
   formatPublished,
   originOf,
   renderableHtml,
+  safeHref,
   toContent,
   toDetail,
   toFilters,
@@ -54,6 +55,24 @@ describe('originOf', () => {
     ['instagram', 'https://www.instagram.com/p/abc/', 'instagram.com'],
   ] as const)('should name the origin of a %s link', (source, url, origin) => {
     expect(originOf({ source, url })).toBe(origin);
+  });
+});
+
+describe('safeHref', () => {
+  it('should only let http(s) links become an href', () => {
+    expect({
+      web: safeHref('https://example.com/a'),
+      script: safeHref('javascript:alert(1)'),
+      broken: safeHref('not a url'),
+      origin: originOf({ source: 'web', url: 'javascript:alert(1)' }),
+      item: toItem(view({ url: 'javascript:alert(1)' })).url,
+    }).toEqual({
+      web: 'https://example.com/a',
+      script: 'about:blank',
+      broken: 'about:blank',
+      origin: '',
+      item: 'about:blank',
+    });
   });
 });
 
