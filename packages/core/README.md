@@ -125,7 +125,18 @@ key chain with the account API. It never stores or sends the password.
 - `onLogout` runs after logout and account deletion so the local record cache can wipe itself.
 - Sessions live in a `SessionStore`: `createMemorySessionStore()`, or
   `createWebStorageSessionStore(localStorage)`. A script running on the origin can read the token
-  in Web Storage, just as it can use the remembered data key.
+  in Web Storage, just as it can use the remembered data key, and use it from anywhere until it
+  expires (30 days) or the user logs out, which deletes it on the server. The email is kept in
+  clear next to it. IndexedDB would not change that. The defence is not letting foreign script
+  run, which the app must treat as a requirement:
+  - a strict CSP with no `unsafe-inline` or `unsafe-eval`: `script-src 'self' 'wasm-unsafe-eval'`
+    (see CSP above), `object-src 'none'`, `base-uri 'none'`, `frame-ancestors 'none'`;
+  - no HTML from saved pages rendered unsanitised: extracted content goes through a sanitiser
+    (Trusted Types where available) and never into `innerHTML` as is.
+
+  Where keeping the session across reloads is not worth the risk, `createMemorySessionStore()` is
+  the drop-in alternative: nothing is persisted and the user logs in on every visit.
+
 - Failures are `AccountApiError` with the server's `code` (`INVALID_CREDENTIALS`,
   `RATE_LIMITED` with `retryAfter`, `UNAUTHORIZED`...), `NETWORK_ERROR` or `BAD_RESPONSE`.
 - The wire contract is exported without any cryptography from `@stash/core/protocol`, which is

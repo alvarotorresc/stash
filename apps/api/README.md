@@ -52,6 +52,20 @@ passwords offline, with no rate limit. Changing the password takes two steps, bo
 the current login key and counted per account: `POST /api/account/password/begin` returns the
 wrapped data key, as the login does, and `PUT /api/account/password` stores the new setup.
 
+### The pepper
+
+`PEPPER` keys every server-side digest through subkeys per purpose: login and recovery key
+hashes, session token hashes, fake salts for unknown emails and rate limit keys. Generate it
+with `openssl rand -base64 48`; only its length is checked.
+
+**Known limitation: no rotation.** Changing the pepper invalidates every stored login and
+recovery hash and every session, so nobody could log in or recover. Rotating it would need a
+pepper version column on users and sessions, both peppers available for a while, and each hash
+redone at the account's next login. That is not part of the first version. If the pepper leaks
+with the database, the login keys and tokens stay safe (they carry 256 bits); what is lost is
+the fake salt, which then reveals which emails have an account, and the rate limit keys, from
+which emails and IPs can be brute-forced.
+
 ### Requests from other sites
 
 The API answers no CORS headers and its `OPTIONS` preflight gets 405, so a page on another
