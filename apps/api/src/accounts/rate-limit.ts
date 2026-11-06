@@ -56,17 +56,21 @@ export const LIMITS = {
    * Extraction proxy, per account, with a daily global cap well under the Workers request quota
    * and the D1 write quota, so a burst of accounts cannot starve every other route.
    */
-  extract: { account: { max: 60, windowMs: 10 * MINUTE }, global: { max: 10_000, windowMs: DAY } },
+  extract: { account: { max: 60, windowMs: 10 * MINUTE }, global: { max: 6000, windowMs: DAY } },
   /**
-   * Record sync, split by cost. A pull only writes its counters; a push can also write
-   * `MAX_PUSH_RECORDS` records, so its daily global cap is what keeps the record writes under
-   * the D1 quota (see the README). A first load of a full account fits in the pull limits.
+   * Record sync, split by cost. A pull only writes its counters and is counted as one request;
+   * a first load of a full account fits in the pull limits. A push is counted by its weight,
+   * the rows it can write (see `src/records/weight.ts`), so these caps are in written rows: a
+   * day of one account stays a fraction of the global cap, which bounds every record write.
    */
   recordsPull: {
     account: { max: 300, windowMs: 10 * MINUTE },
     global: { max: 3000, windowMs: DAY },
   },
-  recordsPush: { account: { max: 30, windowMs: 10 * MINUTE }, global: { max: 50, windowMs: DAY } },
+  recordsPush: {
+    account: { max: 6000, windowMs: DAY },
+    global: { max: 24_000, windowMs: DAY },
+  },
 } as const satisfies Record<string, Partial<Record<Bucket, Limit>>>;
 
 export type Action = keyof typeof LIMITS;

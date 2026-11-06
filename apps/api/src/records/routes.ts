@@ -27,6 +27,7 @@ import { enforceRateLimit } from '../accounts/rate-limit';
 import { createSessionResolver, requireSession } from '../auth/session';
 import { jsonData, jsonError, jsonPage } from '../http';
 import { RecordsError, readPull, readPush, type ParsedOperation } from './validation';
+import { pushWeight } from './weight';
 
 interface Context {
   readonly request: Request;
@@ -109,9 +110,11 @@ function checkQuota(
 
 async function push(context: Context): Promise<Response> {
   const { request, db, pepper, accountId, now } = context;
-  // The body is checked first: a refused body costs no write.
+  // The body is checked first: a refused body costs no write. The push is then counted by the
+  // rows it can write, before any read of the records, so a refused push costs no reads either.
   const operations = await readPush(request);
-  await enforceRateLimit(db, pepper, 'recordsPush', { account: accountId }, now);
+  const weight = pushWeight(operations);
+  await enforceRateLimit(db, pepper, 'recordsPush', { account: accountId }, now, weight);
 
   const [existingResult, countsResult] = await db.batch([
     db

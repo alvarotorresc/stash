@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:workers';
-import { API_PATHS } from '@stash/core/protocol';
+import { API_PATHS, toBase64Url } from '@stash/core/protocol';
 import {
   MAX_BLOB_BYTES,
   MAX_BYTES_PER_ACCOUNT,
@@ -15,8 +15,11 @@ import {
   type WireRecord,
 } from '@stash/core/sync-protocol';
 import { describe, expect, it } from 'vitest';
+import { hmac } from '../src/accounts/hashing';
 import { LIMITS } from '../src/accounts/rate-limit';
+import { readPush, type ParsedOperation } from '../src/records/validation';
 import { CREATE, PUT } from '../src/records/routes';
+import { pushWeight } from '../src/records/weight';
 import { call, dataOf, errorOf, randomKey, register } from './helpers';
 
 /** A random-looking base64url blob of `bytes` decoded bytes (getRandomValues caps at 64 KiB). */
@@ -60,6 +63,17 @@ async function pullAll(
     next = page.meta.nextCursor;
     if (!page.meta.hasMore) return { records, cursor: next };
   }
+}
+
+/** Operations as the route parses them. */
+function parse(operations: PushOperation[]): Promise<ParsedOperation[]> {
+  return readPush(
+    new Request('https://stash.test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ operations }),
+    }),
+  );
 }
 
 async function countsOf(token: string): Promise<{ records: number; bytes: number } | null> {
@@ -660,6 +674,13 @@ describe('/api/records', () => {
   });
 
   describe('quotas', () => {
+    it('should keep at most 5000 records and 25 MiB per account', () => {
+      expect({ records: MAX_RECORDS_PER_ACCOUNT, bytes: MAX_BYTES_PER_ACCOUNT }).toEqual({
+        records: 5_000,
+        bytes: 25 * 1024 * 1024,
+      });
+    });
+
     it('should refuse new records over the per-account count', async () => {
       const { token } = await register();
       await setCounts(token, MAX_RECORDS_PER_ACCOUNT - 1, 0);
@@ -709,6 +730,25 @@ describe('/api/records', () => {
   });
 
   describe('rate limiting', () => {
+    async function counterKey(action: string, bucket: string, subject: string): Promise<string> {
+      return toBase64Url(
+        await hmac(env.PEPPER, 'rate-limit', `${action}\u0000${bucket}\u0000${subject}`),
+      );
+    }
+
+    async function countOf(key: string): Promise<number | null> {
+      const row = await env.DB.prepare('SELECT count FROM rate_limits WHERE key = ?')
+        .bind(key)
+        .first<{ count: number }>();
+      return row?.count ?? null;
+    }
+
+    async function fill(key: string, count: number): Promise<void> {
+      await env.DB.prepare('INSERT INTO rate_limits (key, window_start, count) VALUES (?, ?, ?)')
+        .bind(key, Date.now(), count)
+        .run();
+    }
+
     it('should count pulls per account and answer 429 over the limit', async () => {
       const { token } = await register();
       for (let index = 0; index < LIMITS.recordsPull.account.max; index += 1) {
@@ -725,37 +765,92 @@ describe('/api/records', () => {
       }).toEqual({ pulled: { status: 429, code: 'RATE_LIMITED' }, retryAfter: true, pushed: 200 });
     });
 
-    it('should count pushes per account and answer 429 over the limit', async () => {
+    it('should count a push by the weight of its operations', async () => {
       const { token } = await register();
-      for (let index = 0; index < LIMITS.recordsPush.account.max; index += 1) {
-        await push(token, [create()]);
-      }
+      const key = await counterKey('recordsPush', 'account', await userIdOf(token));
+      const global = await counterKey('recordsPush', 'global', '');
+      const a = create();
+      const b = create();
+      await push(token, [a, b]);
+      const afterCreates = { account: await countOf(key), global: await countOf(global) };
+      const edits: PushOperation[] = [
+        { op: 'put', id: a.id, kind: 'item', blob: blob() },
+        { op: 'delete', id: b.id, kind: 'item' },
+      ];
 
-      const pushed = await pushRaw(token, { operations: [create()] });
-      const pulled = await call(RECORDS_PATH, { token });
+      await push(token, edits);
+      await push(token, [{ op: 'delete', id: a.id, kind: 'item' }]);
 
-      expect({ pushed: await errorOf(pushed), pulled: pulled.status }).toEqual({
-        pushed: { status: 429, code: 'RATE_LIMITED' },
-        pulled: 200,
+      expect({
+        afterCreates,
+        account: await countOf(key),
+        global: await countOf(global),
+        weights: [pushWeight(await parse([a, b])), pushWeight(await parse(edits))],
+      }).toEqual({
+        // Request 3, a new record 4 each, the possible first record of the account 1.
+        afterCreates: { account: 12, global: 12 },
+        // Then a put (charged as a possible insert) and a delete, and a lone delete.
+        account: 12 + 11 + 6,
+        global: 12 + 11 + 6,
+        weights: [12, 11],
       });
     });
 
-    it('should cap the pushes of every account together in a day', async () => {
-      const cap = LIMITS.recordsPush.global.max;
-      const perAccount = LIMITS.recordsPush.account.max;
-      let sent = 0;
-      while (sent < cap) {
-        const { token } = await register();
-        for (let index = 0; index < perAccount && sent < cap; index += 1, sent += 1) {
-          await push(token, [create()]);
-        }
-      }
+    it('should accept a push that fills the account bucket exactly', async () => {
+      const { token } = await register();
+      const key = await counterKey('recordsPush', 'account', await userIdOf(token));
+      const operations = [create()];
+      await fill(key, LIMITS.recordsPush.account.max - pushWeight(await parse(operations)));
+
+      await push(token, operations);
+
+      expect(await countOf(key)).toBe(LIMITS.recordsPush.account.max);
+    });
+
+    it('should refuse a push over the account bucket, write nothing and keep pulls open', async () => {
+      const { token } = await register();
+      const key = await counterKey('recordsPush', 'account', await userIdOf(token));
+      const operations = [create()];
+      const before = LIMITS.recordsPush.account.max - pushWeight(await parse(operations)) + 1;
+      await fill(key, before);
+
+      const pushed = await pushRaw(token, { operations });
+      const pulled = await pull(token);
+
+      expect({
+        pushed: await errorOf(pushed),
+        account: await countOf(key),
+        global: await countOf(await counterKey('recordsPush', 'global', '')),
+        stored: pulled.records.length,
+      }).toEqual({
+        pushed: { status: 429, code: 'RATE_LIMITED' },
+        account: before,
+        global: null,
+        stored: 0,
+      });
+    });
+
+    it('should cap the weight of every push together in a day', async () => {
+      const operations = [create()];
+      const global = await counterKey('recordsPush', 'global', '');
+      await fill(global, LIMITS.recordsPush.global.max - pushWeight(await parse(operations)) + 1);
       const { token } = await register();
 
-      expect(await errorOf(await pushRaw(token, { operations: [create()] }))).toEqual({
+      expect(await errorOf(await pushRaw(token, { operations }))).toEqual({
         status: 429,
         code: 'RATE_LIMITED',
       });
+    });
+
+    it('should keep the heaviest push under every push limit', async () => {
+      const operations = Array.from({ length: MAX_PUSH_RECORDS }, () => create());
+      const weight = pushWeight(await parse(operations));
+
+      expect({
+        weight,
+        account: weight <= LIMITS.recordsPush.account.max,
+        global: weight <= LIMITS.recordsPush.global.max,
+      }).toEqual({ weight: 3 + MAX_PUSH_RECORDS * 4 + 1, account: true, global: true });
     });
   });
 

@@ -95,9 +95,10 @@ subject, so neither emails nor IP addresses are stored. Limits are in `src/accou
 | Recovery (both steps)                 | 10 / hour   | failures: 5 / hour per email+IP,   | 300 / hour    |
 |                                       |             | 20 / hour per email                |               |
 | Password change, upgrade, deletion    | -           | 10 / hour per account              | -             |
-| Extraction (`/api/extract`, `/image`) | -           | 60 / 10 min per account            | 10 000 / day  |
+| Extraction (`/api/extract`, `/image`) | -           | 60 / 10 min per account            | 6000 / day    |
 | Sync pull (`GET /api/records`)        | -           | 300 / 10 min per account           | 3000 / day    |
-| Sync push (`POST /api/records`)       | -           | 30 / 10 min per account            | 50 / day      |
+| Sync push (`POST /api/records`)       | -           | 6000 rows / day per account        | 24 000 rows / |
+|                                       |             |                                    | day           |
 
 Register, login, recovery and the password proofs also share a **daily budget of 5000
 requests**. Spent, nobody can register, log in or recover until 00:00 UTC, but open sessions,
@@ -107,7 +108,8 @@ WAF rule below.
 
 How a request is counted:
 
-1. Every bucket of the request is read. If any is full, the answer is 429 `RATE_LIMITED` with
+1. Every bucket of the request is read. A request has a cost, 1 unless said otherwise, and adds
+   it to each bucket. If any bucket has no room for it, the answer is 429 `RATE_LIMITED` with
    `Retry-After`, and nothing is written.
 2. The specific buckets (IP, account) are counted with an upsert that does not touch a full
    bucket.
@@ -116,6 +118,12 @@ How a request is counted:
 4. Failed login keys and recovery keys are then counted per email and per email and IP. A right
    key never counts, so nobody can lock an owner out by guessing; a targeted lockout needs many
    IPs.
+
+A push is counted by its weight: the rows it can write, from the validated body alone, so a
+refused push costs no read of the records either. It is 3 for the request's own counters, 4 per
+`create` or `put` (a put may insert a new record), 3 per `delete`, and 1 more when the push may
+create the account's first record. The heaviest push, 100 new records, weighs 404. A save or an
+edit pushed alone weighs 8, a delete 6; batched, an operation costs about 4.
 
 The Workers Rate Limiting binding was not used: it is approximate, per location, and its
 availability on the Free plan is not verified.
@@ -131,43 +139,77 @@ Measured costs: counting a bucket writes 1 row (`rate_limits` has no rowid and n
 index), a session 2 rows (row and `user_id` index), a user 3 rows and updating a user 1 row.
 A new record writes 4 rows (row, primary key, `version` index and its `record_counts` update; 5
 for the first record of an account, which creates that row), an edit or a delete of a record 3.
-Deleting a row is charged like inserting it. Keys of IPs, emails and accounts are assumed new on
-every request (the attacker rotates them), so each costs its insert and its later deletion: 2.
+A `record_counts` row is 2 rows and the tombstone of a deleted account 1. Deleting a row is
+charged like inserting it. Keys of IPs, emails and accounts are assumed new on every request
+(the attacker rotates them), so each costs its insert and its later deletion: 2.
 
-| Worst accepted request | Rows                                                              |
-| ---------------------- | ----------------------------------------------------------------- |
-| Register               | IP 2 + global 1 + budget 1 + user 3 + session 2×2 = **11**        |
-| Login                  | IP 2 + global 1 + budget 1 + session 2×2 (or failures 4) = **8**  |
-| Recovery               | IP 2 + global 1 + budget 1 + user update 1 + session 4 = **9**    |
-| Password proof         | account 2 + budget 1 + user 3 = **6**                             |
-| Extraction             | account 1 + global 1 = **2** (stable keys, see below)             |
-| Sync pull              | account 2 + global 1 = **3**                                      |
-| Sync push              | account 2 + global 1 + 100 records × 4 + first record 1 = **404** |
+| Worst accepted request | Rows                                                             |
+| ---------------------- | ---------------------------------------------------------------- |
+| Register               | IP 2 + global 1 + budget 1 + user 3 + session 2×2 = **11**       |
+| Login                  | IP 2 + global 1 + budget 1 + session 2×2 (or failures 4) = **8** |
+| Recovery               | IP 2 + global 1 + budget 1 + user update 1 + session 4 = **9**   |
+| Password proof         | account 2 + budget 1 + deletion (user 3 + counts 2 + tombstone   |
+|                        | 1; a password change rewrites the user, 1) = **9**               |
+| Extraction             | account 1 + global 1 = **2** (stable keys, see below)            |
+| Sync pull              | account 2 + global 1 = **3**                                     |
+| Sync push              | its weight, at most 3 + 100 records × 4 + first record 1 = 404   |
 
 | Per day                                                   | Rows       |
 | --------------------------------------------------------- | ---------- |
 | Budget: 100 registrations × 11 + 4 900 other requests × 9 | 45 200     |
-| Extraction: 10 000 × 2                                    | 20 000     |
-| Sync pulls: 3000 × 3                                      | 9 000      |
-| Sync pushes: 50 × 404                                     | 20 200     |
-| **Worst case**                                            | **94 400** |
+| Extraction: 6 000 × 2                                     | 12 000     |
+| Sync pulls: 3 000 × 3                                     | 9 000      |
+| Sync pushes: the global cap, already in rows              | 24 000     |
+| Purge of deleted accounts: 1 000 records × 4              | 4 000      |
+| **Worst case**                                            | **94 200** |
 
-The account and extraction routes stay under 70 000 rows and sync under 30 000; the test checks
-both ceilings. A push is charged as if it carried `MAX_PUSH_RECORDS` (100) new records, so the
-daily cap of 50 pushes for every account together is what bounds the record writes. It is low
-for real use: once spent, nobody can push until 00:00 UTC (pulls and the local copy keep
-working). Raising it needs counting a push by its operations instead of as one request.
+The test checks the total against a ceiling of 95 000, a 5 % margin under the quota. The weights
+are checked against the measured costs too, so a schema change that makes a record cost more
+fails until the weights follow.
+
+What fits in a day: about 3 000 saves or edits pushed one by one for every account together, or
+6 000 operations in batches, and 750 single saves for one account. A few people saving and
+sorting tens or hundreds of items a day each stay well inside it. Spent, nobody can push until
+00:00 UTC; pulls and the local copy keep working. A first upload of a full account (5 000
+records, about 20 000 rows) takes four days at the per-account cap.
 
 The sweep (a cron trigger at 04:17 UTC) deletes at most 25 000 rows per table in a run, above
 what a day of requests can leave behind, so a backlog never spends the quota in one go. Extraction assumes an
 account's key is inserted and swept at most once a day: it holds while the accounts that extract
 in a day are few next to the extractions. Any new rate-limited action must be added to the test.
 
-**Limit that remains:** deleting an account removes all its records in one batch, up to
-`MAX_RECORDS_PER_ACCOUNT` (20 000) rows of about 4 written rows each. Records pile up over many
-days, so no daily cap bounds what deleting several full accounts on the same day costs, and it
-can spend the whole quota. This sum does not include it; a lower per-account quota or a purge
-spread over the daily sweep would.
+### Account deletion and the purge
+
+Deleting an account is one transaction of a few rows, whatever the account holds: it removes
+the user (and with it the wrapped data keys), its sessions, its `record_counts` row and its rate
+limit counters, and writes a tombstone with its id to `deleted_users`. From that moment the
+account does not exist: no session names it, and its records stay encrypted under a key that
+only the deleted user row wrapped.
+
+The records themselves are purged by the daily sweep, at most 1 000 per run, so a full account
+is gone within five days and deleting many accounts on the same day costs the quota no more than
+one run. Until then they cannot be read by anyone:
+
+- Every records query is filtered by the account of the session, and the sessions went with the
+  user.
+- Tombstones are kept for good (one row per deleted account, a random id and nothing else), and
+  a trigger refuses a new user with a tombstoned id, so a new account can never inherit them.
+- `records` has no foreign key to `users`, or deleting the user would cascade to every record
+  in the same transaction. A trigger refuses a record whose user does not exist instead, which
+  also stops a push that passed its session check just before the deletion.
+
+The migration that creates `records` (`0002`) was changed in place instead of adding a new one:
+it had not reached `main` yet, only the branch that introduces sync, and removing a foreign key
+in a later migration would mean rebuilding the table.
+
+### Quotas
+
+An account keeps at most 5 000 records and 25 MiB of blobs (5 KiB per record on average). The D1
+Free plan caps a database at 500 MB, so about 20 full accounts fit.
+
+**Known limit:** deleted records stay as tombstones and count towards the 5 000, so an account
+that saves and deletes a lot reaches the cap with fewer live items. Freeing them would need
+compacting tombstones that every device has already pulled.
 
 **Limit that remains:** the Workers Free plan also caps requests at 100 000 a day. An attacker
 can still spend that quota; only the WAF rule keeps abuse from reaching the Worker.
