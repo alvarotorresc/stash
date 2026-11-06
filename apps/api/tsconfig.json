@@ -3,5 +3,7 @@
   "compilerOptions": {
     "types": ["@cloudflare/workers-types", "@cloudflare/vitest-plugin/types"]
   },
-  "include": ["src", "test", "vitest.config.ts"]
+  "include": ["src", "test", "vitest.config.ts"],
+  // Client-side code under test is checked with DOM types by test/e2e/tsconfig.json.
+  "exclude": ["test/e2e"]
 }
