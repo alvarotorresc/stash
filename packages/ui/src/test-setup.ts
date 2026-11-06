@@ -36,3 +36,14 @@ if (!Element.prototype.animate) {
     return animation as unknown as Animation;
   };
 }
+
+// jsdom has <dialog> but not its modal methods.
+if (!HTMLDialogElement.prototype.showModal) {
+  HTMLDialogElement.prototype.showModal = function (this: HTMLDialogElement) {
+    this.open = true;
+  };
+  HTMLDialogElement.prototype.close = function (this: HTMLDialogElement) {
+    this.open = false;
+    this.dispatchEvent(new Event('close'));
+  };
+}
