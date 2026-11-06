@@ -52,6 +52,21 @@ describe('Popup', () => {
     expect(onclose).toHaveBeenCalledTimes(3);
   });
 
+  it('should hand the HTML and meta tags read from the tab to the service', async () => {
+    const tab = {
+      url: 'https://example.com/a',
+      title: 'Artículo',
+      html: '<html><body><p>Hola</p></body></html>',
+      meta: [{ key: 'description', content: 'Resumen' }],
+    };
+    const service = createMockPopupService({ tab });
+    const save = vi.spyOn(service, 'save');
+    render(App, { service, onclose: () => {} });
+
+    expect(await screen.findByText('Guardado')).toBeTruthy();
+    expect(save).toHaveBeenCalledWith(tab);
+  });
+
   it('should show the tab while saving', async () => {
     renderPopup({ latency: 20 });
 
