@@ -12,6 +12,7 @@
     "test": "vitest run --coverage"
   },
   "dependencies": {
+    "@stash/ui": "workspace:*",
     "workbox-precaching": "7.4.1"
   },
   "devDependencies": {

@@ -225,6 +225,10 @@ importers:
         version: 4.157.0(@cloudflare/workers-types@5.20261103.1)
 
   apps/extension:
+    dependencies:
+      '@stash/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
     devDependencies:
       '@sveltejs/vite-plugin-svelte':
         specifier: 7.3.1
@@ -262,6 +266,9 @@ importers:
 
   apps/pwa:
     dependencies:
+      '@stash/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
       workbox-precaching:
         specifier: 7.4.1
         version: 7.4.1
