@@ -225,6 +225,9 @@ describe('parsePage limits', () => {
     ]);
     // Most of the time is jsdom building the tree; reader mode alone took minutes here.
     // Shared CI runners are several times slower than a developer machine.
-    expect(elapsed).toBeLessThan(process.env.CI ? 20_000 : 4000);
+    const onCi = Boolean(
+      (globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env.CI,
+    );
+    expect(elapsed).toBeLessThan(onCi ? 20_000 : 4000);
   }, 60_000);
 });
