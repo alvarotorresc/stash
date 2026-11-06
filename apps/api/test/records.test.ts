@@ -15,6 +15,7 @@ import {
   type WireRecord,
 } from '@stash/core/sync-protocol';
 import { describe, expect, it } from 'vitest';
+import { LIMITS } from '../src/accounts/rate-limit';
 import { call, dataOf, errorOf, randomKey, register } from './helpers';
 
 /** A random-looking base64url blob of `bytes` decoded bytes (getRandomValues caps at 64 KiB). */
@@ -646,9 +647,11 @@ describe('/api/records', () => {
   });
 
   describe('rate limiting', () => {
-    it('should count pulls and pushes per account and answer 429 over the limit', async () => {
+    it('should count pulls per account and answer 429 over the limit', async () => {
       const { token } = await register();
-      for (let index = 0; index < 300; index += 1) await call(RECORDS_PATH, { token });
+      for (let index = 0; index < LIMITS.recordsPull.account.max; index += 1) {
+        await call(RECORDS_PATH, { token });
+      }
 
       const pulled = await call(RECORDS_PATH, { token });
       const pushed = await pushRaw(token, { operations: [create()] });
@@ -656,11 +659,40 @@ describe('/api/records', () => {
       expect({
         pulled: await errorOf(pulled),
         retryAfter: Number(pulled.headers.get('Retry-After')) > 0,
-        pushed: await errorOf(pushed),
-      }).toEqual({
-        pulled: { status: 429, code: 'RATE_LIMITED' },
-        retryAfter: true,
+        pushed: pushed.status,
+      }).toEqual({ pulled: { status: 429, code: 'RATE_LIMITED' }, retryAfter: true, pushed: 200 });
+    });
+
+    it('should count pushes per account and answer 429 over the limit', async () => {
+      const { token } = await register();
+      for (let index = 0; index < LIMITS.recordsPush.account.max; index += 1) {
+        await push(token, [create()]);
+      }
+
+      const pushed = await pushRaw(token, { operations: [create()] });
+      const pulled = await call(RECORDS_PATH, { token });
+
+      expect({ pushed: await errorOf(pushed), pulled: pulled.status }).toEqual({
         pushed: { status: 429, code: 'RATE_LIMITED' },
+        pulled: 200,
+      });
+    });
+
+    it('should cap the pushes of every account together in a day', async () => {
+      const cap = LIMITS.recordsPush.global.max;
+      const perAccount = LIMITS.recordsPush.account.max;
+      let sent = 0;
+      while (sent < cap) {
+        const { token } = await register();
+        for (let index = 0; index < perAccount && sent < cap; index += 1, sent += 1) {
+          await push(token, [create()]);
+        }
+      }
+      const { token } = await register();
+
+      expect(await errorOf(await pushRaw(token, { operations: [create()] }))).toEqual({
+        status: 429,
+        code: 'RATE_LIMITED',
       });
     });
   });

@@ -1,5 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { API_PATHS } from '@stash/core/protocol';
+import { RECORDS_PATH } from '@stash/core/sync-protocol';
 import { describe, expect, it } from 'vitest';
 import { accountCounterKeys } from '../src/accounts/rate-limit';
 import { call, dataOf, errorOf, login, randomKey, register } from './helpers';
@@ -45,10 +46,41 @@ describe('DELETE /api/account', () => {
     });
   });
 
+  it('should delete the records of the account and their counts', async () => {
+    const { keys, token } = await register();
+    const other = await register();
+    const operations = [
+      { op: 'create', id: crypto.randomUUID(), kind: 'item', blob: randomKey(64) },
+    ];
+    await dataOf(await call(RECORDS_PATH, { method: 'POST', token, body: { operations } }));
+    await dataOf(
+      await call(RECORDS_PATH, { method: 'POST', token: other.token, body: { operations } }),
+    );
+
+    await dataOf(await deleteAccount(token, keys.loginKey));
+    const left = await env.DB.prepare(
+      `SELECT (SELECT count(*) FROM records) AS records,
+              (SELECT count(*) FROM record_counts) AS counts`,
+    ).first<{ records: number; counts: number }>();
+
+    expect(left).toEqual({ records: 1, counts: 1 });
+  });
+
   it('should delete the rate limit counters tied to the account', async () => {
     const { keys, token } = await register();
     const userId = (await env.DB.prepare('SELECT id FROM users').first<{ id: string }>())?.id;
     const counters = await accountCounterKeys(env.PEPPER, userId as string);
+    // The sync counters exist before the deletion (the proof counter is the deletion itself).
+    const operations = [
+      { op: 'create', id: crypto.randomUUID(), kind: 'item', blob: randomKey(64) },
+    ];
+    await dataOf(await call(RECORDS_PATH, { method: 'POST', token, body: { operations } }));
+    await dataOf(await call(RECORDS_PATH, { token }));
+    const before = await env.DB.prepare(
+      `SELECT count(*) AS n FROM rate_limits WHERE key IN (${counters.map(() => '?').join(', ')})`,
+    )
+      .bind(...counters)
+      .first<{ n: number }>();
 
     await dataOf(await deleteAccount(token, keys.loginKey));
     const left = await env.DB.prepare(
@@ -57,7 +89,11 @@ describe('DELETE /api/account', () => {
       .bind(...counters)
       .first<{ n: number }>();
 
-    expect({ tracked: counters.length, left: left?.n }).toEqual({ tracked: 3, left: 0 });
+    expect({ tracked: counters.length, before: before?.n, left: left?.n }).toEqual({
+      tracked: 4,
+      before: 2,
+      left: 0,
+    });
   });
 
   it('should delete the failed attempt counters of its email', async () => {

@@ -51,20 +51,20 @@ const INSERT = `INSERT INTO records (user_id, id, kind, version, deleted, blob, 
   VALUES (?1, ?2, ?3, ${NEXT_VERSION}, 0, ?4, ?5, ?6, ?6)`;
 
 /** Only stores a new id: retrying a create never overwrites a later edit or a delete. */
-const CREATE = `${INSERT} ON CONFLICT (user_id, id) DO NOTHING RETURNING version`;
+export const CREATE = `${INSERT} ON CONFLICT (user_id, id) DO NOTHING RETURNING version`;
 
 /**
  * Last write wins, also over a tombstone (undo of a delete). Sending the same blob again
  * changes nothing, so a retried put does not bump the version.
  */
-const PUT = `${INSERT}
+export const PUT = `${INSERT}
   ON CONFLICT (user_id, id) DO UPDATE SET version = excluded.version, deleted = 0,
     blob = excluded.blob, size = excluded.size, updated_at = excluded.updated_at
   WHERE records.kind = excluded.kind AND (records.deleted = 1 OR records.blob IS NOT excluded.blob)
   RETURNING version`;
 
 /** Logical delete: the row stays as a tombstone with no blob, so other devices see it go. */
-const DELETE = `UPDATE records SET deleted = 1, blob = NULL, size = 0, updated_at = ?4,
+export const DELETE = `UPDATE records SET deleted = 1, blob = NULL, size = 0, updated_at = ?4,
     version = ${NEXT_VERSION}
   WHERE user_id = ?1 AND id = ?2 AND kind = ?3 AND deleted = 0
   RETURNING version`;
@@ -111,7 +111,7 @@ async function push(context: Context): Promise<Response> {
   const { request, db, pepper, accountId, now } = context;
   // The body is checked first: a refused body costs no write.
   const operations = await readPush(request);
-  await enforceRateLimit(db, pepper, 'records', { account: accountId }, now);
+  await enforceRateLimit(db, pepper, 'recordsPush', { account: accountId }, now);
 
   const [existingResult, countsResult] = await db.batch([
     db
@@ -169,7 +169,7 @@ interface RecordRow {
  */
 async function pull(context: Context): Promise<Response> {
   const { request, db, pepper, accountId, now } = context;
-  await enforceRateLimit(db, pepper, 'records', { account: accountId }, now);
+  await enforceRateLimit(db, pepper, 'recordsPull', { account: accountId }, now);
   const { cursor, limit } = readPull(new URL(request.url));
 
   const [candidatesResult, headResult] = await db.batch([
@@ -228,7 +228,7 @@ export function isRecordsPath(pathname: string): boolean {
   return pathname === RECORDS_PATH;
 }
 
-/** Handles `/api/records`: every method needs a session and counts in the account's limit. */
+/** Handles `/api/records`: every method needs a session and counts in the account's limits. */
 export async function handleRecordsRequest(request: Request, env: AccountsEnv): Promise<Response> {
   const method = request.method;
   if (method !== 'GET' && method !== 'POST') {

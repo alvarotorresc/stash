@@ -96,6 +96,8 @@ subject, so neither emails nor IP addresses are stored. Limits are in `src/accou
 |                                       |             | 20 / hour per email                |               |
 | Password change, upgrade, deletion    | -           | 10 / hour per account              | -             |
 | Extraction (`/api/extract`, `/image`) | -           | 60 / 10 min per account            | 10 000 / day  |
+| Sync pull (`GET /api/records`)        | -           | 300 / 10 min per account           | 3000 / day    |
+| Sync push (`POST /api/records`)       | -           | 30 / 10 min per account            | 50 / day      |
 
 Register, login, recovery and the password proofs also share a **daily budget of 5000
 requests**. Spent, nobody can register, log in or recover until 00:00 UTC, but open sessions,
@@ -127,28 +129,45 @@ recomputes this sum from the limits, so raising a cap past the ceiling fails the
 
 Measured costs: counting a bucket writes 1 row (`rate_limits` has no rowid and no secondary
 index), a session 2 rows (row and `user_id` index), a user 3 rows and updating a user 1 row.
+A new record writes 4 rows (row, primary key, `version` index and its `record_counts` update; 5
+for the first record of an account, which creates that row), an edit or a delete of a record 3.
 Deleting a row is charged like inserting it. Keys of IPs, emails and accounts are assumed new on
 every request (the attacker rotates them), so each costs its insert and its later deletion: 2.
 
-| Worst accepted request | Rows                                                             |
-| ---------------------- | ---------------------------------------------------------------- |
-| Register               | IP 2 + global 1 + budget 1 + user 3 + session 2×2 = **11**       |
-| Login                  | IP 2 + global 1 + budget 1 + session 2×2 (or failures 4) = **8** |
-| Recovery               | IP 2 + global 1 + budget 1 + user update 1 + session 4 = **9**   |
-| Password proof         | account 2 + budget 1 + user 3 = **6**                            |
-| Extraction             | account 1 + global 1 = **2** (stable keys, see below)            |
+| Worst accepted request | Rows                                                              |
+| ---------------------- | ----------------------------------------------------------------- |
+| Register               | IP 2 + global 1 + budget 1 + user 3 + session 2×2 = **11**        |
+| Login                  | IP 2 + global 1 + budget 1 + session 2×2 (or failures 4) = **8**  |
+| Recovery               | IP 2 + global 1 + budget 1 + user update 1 + session 4 = **9**    |
+| Password proof         | account 2 + budget 1 + user 3 = **6**                             |
+| Extraction             | account 1 + global 1 = **2** (stable keys, see below)             |
+| Sync pull              | account 2 + global 1 = **3**                                      |
+| Sync push              | account 2 + global 1 + 100 records × 4 + first record 1 = **404** |
 
 | Per day                                                   | Rows       |
 | --------------------------------------------------------- | ---------- |
 | Budget: 100 registrations × 11 + 4 900 other requests × 9 | 45 200     |
 | Extraction: 10 000 × 2                                    | 20 000     |
-| **Worst case**                                            | **65 200** |
+| Sync pulls: 3000 × 3                                      | 9 000      |
+| Sync pushes: 50 × 404                                     | 20 200     |
+| **Worst case**                                            | **94 400** |
 
-That leaves about 35 000 rows a day for sync and the daily sweep. The sweep (a cron trigger at
-04:17 UTC) deletes at most 25 000 rows per table in a run, above what a day of requests can
-leave behind, so a backlog never spends the quota in one go. Extraction assumes an
+The account and extraction routes stay under 70 000 rows and sync under 30 000; the test checks
+both ceilings. A push is charged as if it carried `MAX_PUSH_RECORDS` (100) new records, so the
+daily cap of 50 pushes for every account together is what bounds the record writes. It is low
+for real use: once spent, nobody can push until 00:00 UTC (pulls and the local copy keep
+working). Raising it needs counting a push by its operations instead of as one request.
+
+The sweep (a cron trigger at 04:17 UTC) deletes at most 25 000 rows per table in a run, above
+what a day of requests can leave behind, so a backlog never spends the quota in one go. Extraction assumes an
 account's key is inserted and swept at most once a day: it holds while the accounts that extract
 in a day are few next to the extractions. Any new rate-limited action must be added to the test.
+
+**Limit that remains:** deleting an account removes all its records in one batch, up to
+`MAX_RECORDS_PER_ACCOUNT` (20 000) rows of about 4 written rows each. Records pile up over many
+days, so no daily cap bounds what deleting several full accounts on the same day costs, and it
+can spend the whole quota. This sum does not include it; a lower per-account quota or a purge
+spread over the daily sweep would.
 
 **Limit that remains:** the Workers Free plan also caps requests at 100 000 a day. An attacker
 can still spend that quota; only the WAF rule keeps abuse from reaching the Worker.

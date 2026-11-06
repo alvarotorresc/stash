@@ -8,6 +8,8 @@ import {
   type Limit,
 } from '../src/accounts/rate-limit';
 import { newSession } from '../src/accounts/sessions';
+import { CREATE, DELETE, PUT } from '../src/records/routes';
+import { MAX_PUSH_RECORDS } from '@stash/core/sync-protocol';
 
 /**
  * Worst case of rows written to D1 in a day by the routes that count in `rate_limits`, against
@@ -16,8 +18,10 @@ import { newSession } from '../src/accounts/sessions';
  * past the ceiling fails here. The README explains the sum.
  */
 const D1_DAILY_WRITES = 100_000;
-/** What the account and extraction routes may spend at most; the rest is left for sync. */
+/** What the account and extraction routes may spend at most. */
 const CEILING = 70_000;
+/** What record sync may spend at most, leaving a margin under the quota. */
+const SYNC_CEILING = 30_000;
 const DAY = 24 * 60 * 60 * 1000;
 
 async function written(statement: D1PreparedStatement): Promise<number> {
@@ -34,6 +38,11 @@ interface Costs {
   sessionInsert: number;
   userInsert: number;
   userUpdate: number;
+  /** The first record of an account also creates its `record_counts` row. */
+  recordCreateFirst: number;
+  recordCreate: number;
+  recordPut: number;
+  recordDelete: number;
 }
 
 async function measure(): Promise<Costs & { deletesWithinInserts: boolean }> {
@@ -70,6 +79,18 @@ async function measure(): Promise<Costs & { deletesWithinInserts: boolean }> {
          updated_at = 1 WHERE id = 'measured'`,
     ),
   );
+  // The statements of a push, as the route runs them.
+  const blob = 'A'.repeat(40);
+  const record = (sql: string, id: string, ...rest: unknown[]) =>
+    written(db.prepare(sql).bind('measured', id, 'item', ...rest));
+  const first = crypto.randomUUID();
+  const recordCreateFirst = await record(CREATE, first, blob, 30, 0);
+  const recordCreate = await record(CREATE, crypto.randomUUID(), blob, 30, 0);
+  const recordPut = await record(PUT, first, 'B'.repeat(40), 30, 1);
+  const recordDelete = await record(DELETE, first, 2);
+  const recordsRemoved = await written(
+    db.prepare("DELETE FROM records WHERE user_id = 'measured'"),
+  );
   const userDelete = await written(db.prepare("DELETE FROM users WHERE id = 'measured'"));
   return {
     counterInsert,
@@ -77,8 +98,15 @@ async function measure(): Promise<Costs & { deletesWithinInserts: boolean }> {
     sessionInsert,
     userInsert,
     userUpdate,
+    recordCreateFirst,
+    recordCreate,
+    recordPut,
+    recordDelete,
     deletesWithinInserts:
-      counterDelete <= counterInsert && sessionDelete <= sessionInsert && userDelete <= userInsert,
+      counterDelete <= counterInsert &&
+      sessionDelete <= sessionInsert &&
+      userDelete <= userInsert &&
+      recordsRemoved <= 2 * recordCreate,
   };
 }
 
@@ -131,6 +159,12 @@ function rowsPerRequest(costs: Costs): Record<Action, number> {
     // Password change rewrites the user; account deletion removes it.
     proof: base('proof') + Math.max(costs.userUpdate, costs.userInsert),
     extract: 0,
+    recordsPull: base('recordsPull'),
+    // A full push of the costliest operation, one of them the first record of the account.
+    recordsPush:
+      base('recordsPush') +
+      MAX_PUSH_RECORDS * Math.max(costs.recordCreate, costs.recordPut, costs.recordDelete) +
+      (costs.recordCreateFirst - costs.recordCreate),
   };
 }
 
@@ -145,12 +179,24 @@ function worstCase(costs: Costs) {
   // while the accounts that extract in a day are few next to the extractions.
   const extractPerRequest = everyRequest('extract').length * costs.counterUpdate;
   const extract = perDay(LIMITS.extract.global) * extractPerRequest;
-  return { rows, auth, extract, total: auth + extract };
+  // Sync keys are charged as new on every request, like the account actions.
+  const sync =
+    perDay(LIMITS.recordsPull.global) * rows.recordsPull +
+    perDay(LIMITS.recordsPush.global) * rows.recordsPush;
+  return { rows, auth, extract, sync, total: auth + extract + sync };
 }
 
 describe('daily D1 write budget', () => {
   it('should account for every rate limited action', () => {
-    const modelled: Action[] = ['register', 'login', 'recovery', 'proof', 'extract'];
+    const modelled: Action[] = [
+      'register',
+      'login',
+      'recovery',
+      'proof',
+      'extract',
+      'recordsPull',
+      'recordsPush',
+    ];
 
     expect((Object.keys(LIMITS) as Action[]).sort()).toEqual([...modelled].sort());
   });
@@ -162,7 +208,7 @@ describe('daily D1 write budget', () => {
     });
   });
 
-  it('should measure one written row per counter and two per session', async () => {
+  it('should measure the rows of counters, sessions, users and records', async () => {
     const costs = await measure();
 
     expect(costs).toEqual({
@@ -171,6 +217,10 @@ describe('daily D1 write budget', () => {
       sessionInsert: 2,
       userInsert: 3,
       userUpdate: 1,
+      recordCreateFirst: 5,
+      recordCreate: 4,
+      recordPut: 3,
+      recordDelete: 3,
       deletesWithinInserts: true,
     });
   });
@@ -180,14 +230,25 @@ describe('daily D1 write budget', () => {
 
     expect({
       ...worst,
-      underCeiling: worst.total <= CEILING,
+      underCeiling: worst.auth + worst.extract <= CEILING,
+      syncUnderCeiling: worst.sync <= SYNC_CEILING,
       underQuota: worst.total < D1_DAILY_WRITES,
     }).toEqual({
-      rows: { register: 11, login: 8, recovery: 9, proof: 6, extract: 0 },
+      rows: {
+        register: 11,
+        login: 8,
+        recovery: 9,
+        proof: 6,
+        extract: 0,
+        recordsPull: 3,
+        recordsPush: 404,
+      },
       auth: 45_200,
       extract: 20_000,
-      total: 65_200,
+      sync: 29_200,
+      total: 94_400,
       underCeiling: true,
+      syncUnderCeiling: true,
       underQuota: true,
     });
   });
