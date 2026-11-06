@@ -145,6 +145,44 @@ describe('sanitizeStoredHtml', () => {
     expect(sanitizeStoredHtml(html)).toBe(expected);
   });
 
+  describe('with the page url', () => {
+    const app = window.location.origin;
+
+    it('should move links and images saved against the app origin back to the page', () => {
+      const saved =
+        `<a href="${app}/en-US/docs/CSP?x=1#top">a</a>` +
+        `<img data-stash-src="${app}/img/a.png">` +
+        '<a href="https://other.example.org/b">b</a><a href="mailto:a@example.com">m</a>';
+
+      expect(sanitizeStoredHtml(saved, BASE)).toBe(
+        '<a href="https://blog.example.com/en-US/docs/CSP?x=1#top" target="_blank" rel="noopener noreferrer">a</a>' +
+          '<img data-stash-src="https://blog.example.com/img/a.png">' +
+          '<a href="https://other.example.org/b" target="_blank" rel="noopener noreferrer">b</a>' +
+          '<a href="mailto:a@example.com" target="_blank" rel="noopener noreferrer">m</a>',
+      );
+    });
+
+    it('should be idempotent', () => {
+      const once = sanitizeStoredHtml(`<a href="${app}/a">a</a>`, BASE);
+      expect(sanitizeStoredHtml(once, BASE)).toBe(once);
+    });
+
+    it.each(['javascript:alert(1)', 'not a url'])(
+      'should only repair against an http(s) page url, not %s',
+      (pageUrl) => {
+        expect(sanitizeStoredHtml(`<img data-stash-src="${app}/a.png">`, pageUrl)).toBe(
+          sanitizeStoredHtml(`<img data-stash-src="${app}/a.png">`),
+        );
+      },
+    );
+
+    it('should still drop images that land on a non-public host', () => {
+      expect(
+        sanitizeStoredHtml(`<img data-stash-src="${app}/a.png">`, 'http://127.0.0.1/post'),
+      ).toBe('<img>');
+    });
+  });
+
   it('should not let stored mode leak into extraction', () => {
     sanitizeStoredHtml('<img data-stash-src="https://cdn.example.com/a.png">');
     expect(sanitizeHtml('<img data-stash-src="https://cdn.example.com/a.png">', BASE)).toBe(

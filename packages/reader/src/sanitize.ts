@@ -77,10 +77,30 @@ interface Mode {
   baseUrl: string | undefined;
   /** Stored HTML: keeps a valid `data-stash-src` on images instead of reading `src`. */
   stored: boolean;
+  /** Stored HTML: page URL that URLs saved against the app's own origin are moved back to. */
+  pageUrl: string | undefined;
 }
 
 let purifier: Purifier | null = null;
-let mode: Mode = { baseUrl: undefined, stored: false };
+const DEFAULT_MODE: Mode = { baseUrl: undefined, stored: false, pageUrl: undefined };
+let mode: Mode = DEFAULT_MODE;
+
+/**
+ * Content read before relative links were resolved against the page has them on the app's origin
+ * (`https://stash.example/en-US/docs/…`). They go back to the page's origin, keeping path, query
+ * and hash. Document-relative links had already lost their directory, so they are only
+ * approximately repaired.
+ */
+function repairAppOrigin(value: string | null): string | null {
+  if (!value || !mode.pageUrl) return value;
+  try {
+    const url = new URL(value.trim());
+    if (url.origin !== window.location.origin) return value;
+    return new URL(`${url.pathname}${url.search}${url.hash}`, mode.pageUrl).href;
+  } catch {
+    return value;
+  }
+}
 
 function getPurifier(): Purifier {
   if (purifier) return purifier;
@@ -91,14 +111,14 @@ function getPurifier(): Purifier {
       mode.stored &&
       node.nodeName === 'IMG' &&
       data.attrName === IMAGE_SOURCE_ATTRIBUTE &&
-      resolvePublicHttpUrl(data.attrValue)
+      resolvePublicHttpUrl(repairAppOrigin(data.attrValue))
     ) {
       data.forceKeepAttr = true;
     }
   });
   instance.addHook('afterSanitizeAttributes', (node) => {
     if (node.nodeName === 'A') {
-      const href = node.getAttribute('href');
+      const href = repairAppOrigin(node.getAttribute('href'));
       const safe =
         href && MAILTO.test(href.trim()) ? href.trim() : resolveHttpUrl(href, mode.baseUrl);
       if (safe) {
@@ -110,7 +130,7 @@ function getPurifier(): Purifier {
       }
     } else if (node.nodeName === 'IMG') {
       const image = mode.stored
-        ? resolvePublicHttpUrl(node.getAttribute(IMAGE_SOURCE_ATTRIBUTE))
+        ? resolvePublicHttpUrl(repairAppOrigin(node.getAttribute(IMAGE_SOURCE_ATTRIBUTE)))
         : resolvePublicHttpUrl(node.getAttribute('src'), mode.baseUrl);
       node.removeAttribute('src');
       if (image) node.setAttribute(IMAGE_SOURCE_ATTRIBUTE, image);
@@ -137,7 +157,7 @@ function run(html: string, next: Mode): string {
   try {
     return instance.sanitize(html, CONFIG);
   } finally {
-    mode = { baseUrl: undefined, stored: false };
+    mode = DEFAULT_MODE;
   }
 }
 
@@ -158,7 +178,7 @@ function run(html: string, next: Mode): string {
  * May throw if the engine runs out of stack on absurdly deep markup; the parsers catch it.
  */
 export function sanitizeHtml(html: string, baseUrl: string): string {
-  return run(html, { baseUrl, stored: false });
+  return run(html, { baseUrl, stored: false, pageUrl: undefined });
 }
 
 /**
@@ -170,9 +190,16 @@ export function sanitizeHtml(html: string, baseUrl: string): string {
  * Same allow-list as `sanitizeHtml`, plus `data-stash-src` kept only on `<img>` and only with an
  * absolute public http(s) URL. Links must already be absolute http(s) or `mailto:`. It is
  * idempotent, and leaves the output of `sanitizeHtml` unchanged.
+ *
+ * With `pageUrl` (the saved item's http(s) URL), links and images that point to the app's own
+ * origin are moved back to the page: earlier versions saved relative links that way.
  */
-export function sanitizeStoredHtml(html: string): string {
-  return run(html, { baseUrl: undefined, stored: true });
+export function sanitizeStoredHtml(html: string, pageUrl?: string): string {
+  return run(html, {
+    baseUrl: undefined,
+    stored: true,
+    pageUrl: resolveHttpUrl(pageUrl) ?? undefined,
+  });
 }
 
 const BLOCK_TAGS = new Set([

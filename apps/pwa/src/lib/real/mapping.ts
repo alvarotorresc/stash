@@ -74,9 +74,13 @@ function escapeHtml(text: string): string {
 /**
  * HTML to render, always through the stored-HTML sanitizer right before it reaches
  * the screen, whatever its origin (fresh read, cache or another device). Content kept
- * without HTML (too large) shows its text, escaped, one paragraph per line.
+ * without HTML (too large) shows its text, escaped, one paragraph per line. With the
+ * item's URL, links saved against the app's own origin point back to the page.
  */
-export function renderableHtml(content: { html?: string; text: string }): SanitizedHtml {
+export function renderableHtml(
+  content: { html?: string; text: string },
+  pageUrl?: string,
+): SanitizedHtml {
   const html =
     content.html ??
     content.text
@@ -85,7 +89,7 @@ export function renderableHtml(content: { html?: string; text: string }): Saniti
       .filter(Boolean)
       .map((line) => `<p>${escapeHtml(line)}</p>`)
       .join('');
-  return sanitizeStoredHtml(html) as SanitizedHtml;
+  return sanitizeStoredHtml(html, pageUrl) as SanitizedHtml;
 }
 
 function readingMinutes(text: string): number {
@@ -124,7 +128,7 @@ export function toContent(view: ItemView, image?: string): ItemContent {
       blocked: content !== null && (view.source === 'x' || view.source === 'reddit'),
     };
   }
-  const html = renderableHtml(content);
+  const html = renderableHtml(content, view.url);
   const origin = originOf(view);
   if (content.kind === 'tweet') {
     const name = view.preview?.author ?? origin;

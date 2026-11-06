@@ -26,9 +26,36 @@ describe('parseHtmlPage', () => {
     expect(article?.textContent).toContain('Unique-word-zebra');
   });
 
-  it('should set a single base with the page url', () => {
-    const { doc, baseUrl } = parseHtmlPage('<p>x</p>', URL_);
-    expect([baseUrl, doc.querySelectorAll('base').length, doc.baseURI]).toEqual([URL_, 1, URL_]);
+  it('should never put a <base> in the document, which the app CSP blocks', () => {
+    const { doc, baseUrl } = parseHtmlPage('<head><base href="/docs/"></head><p>x</p>', URL_);
+    expect([baseUrl, doc.querySelectorAll('base').length, doc.baseURI]).toEqual([
+      'https://danluu.example.com/docs/',
+      0,
+      'https://danluu.example.com/docs/',
+    ]);
+  });
+
+  it('should let Readability resolve every kind of relative URL against the page', () => {
+    const html = `<article><h1>T</h1><p>${'Words in a paragraph. '.repeat(30)}
+      <a href="next/">a</a> <a href="/root">b</a> <a href="//cdn.example.net/c">c</a>
+      <a href="#part">d</a> <a href="?q=1">e</a></p>
+      <img src="img/one.png"><img data-src="/lazy.png" src="data:image/gif;base64,R0lGODlhAQABAAAAACw="></article>`;
+    const { doc } = parseHtmlPage(html, URL_);
+
+    const content = new Readability(doc).parse()?.content ?? '';
+    const out = new DOMParser().parseFromString(content, 'text/html');
+
+    expect(Array.from(out.querySelectorAll('a'), (a) => a.getAttribute('href'))).toEqual([
+      'https://danluu.example.com/post/next/',
+      'https://danluu.example.com/root',
+      'https://cdn.example.net/c',
+      'https://danluu.example.com/post/#part',
+      'https://danluu.example.com/post/?q=1',
+    ]);
+    expect(Array.from(out.querySelectorAll('img'), (img) => img.getAttribute('src'))).toEqual([
+      'https://danluu.example.com/post/img/one.png',
+      'https://danluu.example.com/lazy.png',
+    ]);
   });
 
   it('should keep the page base when it is http(s)', () => {
@@ -39,5 +66,28 @@ describe('parseHtmlPage', () => {
   it('should ignore a javascript: base', () => {
     const { baseUrl } = parseHtmlPage('<head><base href="javascript:alert(1)"></head>', URL_);
     expect(baseUrl).toBe(URL_);
+  });
+
+  it('should neutralize inline styles before parsing, so the app CSP never sees them', () => {
+    const { doc } = parseHtmlPage(
+      '<head><style>p{color:red}</style></head><p style="color:red" title="a style=b">x</p>' +
+        '<svg><path style="stroke:url(#a)"/><style>.a{color:blue}</style></svg>' +
+        '<pre>&lt;p style="color:red"&gt;</pre>',
+      URL_,
+    );
+
+    expect([
+      doc.querySelectorAll('[style]').length,
+      doc.querySelectorAll('style').length,
+      doc.querySelector('p')?.getAttribute('title'),
+      doc.querySelector('pre')?.textContent,
+      doc.body.textContent?.includes('blue'),
+    ]).toEqual([0, 0, 'a style=b', '<p style="color:red">', false]);
+  });
+
+  it.each(['<a', '<a ', '<a "'])('should neutralize unclosed tags quickly: %s', (unit) => {
+    const started = performance.now();
+    parseHtmlPage(unit.repeat(20_000), URL_);
+    expect(performance.now() - started).toBeLessThan(2000);
   });
 });

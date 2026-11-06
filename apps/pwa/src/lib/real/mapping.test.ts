@@ -167,6 +167,15 @@ describe('toContent', () => {
     });
   });
 
+  it('should point links saved against the app origin back to the article', () => {
+    const html = `<p><a href="${window.location.origin}/notas">notas</a></p>`;
+    const article = view({ content: { kind: 'article', html, text: 'notas' } });
+
+    expect(toContent(article)).toMatchObject({
+      html: expect.stringContaining('href="https://www.blog.example.com/notas"'),
+    });
+  });
+
   it('should show a Reddit post with its author', () => {
     const post = view({
       url: 'https://www.reddit.com/r/askspain/comments/abc/x/',
