@@ -1,7 +1,9 @@
+import { handleAccountsRequest, isAccountsPath } from './accounts/routes';
+import type { AccountsEnv } from './accounts/env';
 import { jsonData, jsonError } from './http';
 
 export default {
-  async fetch(request): Promise<Response> {
+  async fetch(request, env): Promise<Response> {
     const { pathname } = new URL(request.url);
 
     if (pathname === '/api/health') {
@@ -11,6 +13,8 @@ export default {
       return jsonData({ ok: true });
     }
 
+    if (isAccountsPath(pathname)) return handleAccountsRequest(request, env);
+
     return jsonError('NOT_FOUND', 'Not found', 404);
   },
-} satisfies ExportedHandler;
+} satisfies ExportedHandler<AccountsEnv>;
