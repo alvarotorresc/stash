@@ -1,0 +1,169 @@
+import { FakeBackend, webPage } from '@stash/client/testing';
+import { fireEvent, screen, waitFor, within } from '@testing-library/svelte';
+import { afterEach, describe, expect, it } from 'vitest';
+import { realDevice, renderRealApp } from '../test-utils';
+
+/**
+ * The account and save flows on the real service: the key chain, encryption, the
+ * encrypted cache and sync, against the in-memory API.
+ */
+
+const EMAIL = 'maria@ejemplo.com';
+const PASSWORD = 'calabaza-asada-2026';
+const ARTICLE = 'https://blog.example.com/despensa';
+
+const devices: ReturnType<typeof realDevice>[] = [];
+
+afterEach(async () => {
+  for (const device of devices.splice(0)) {
+    await device.stash.idle();
+    device.stash.dispose();
+  }
+});
+
+function newDevice(backend = new FakeBackend()) {
+  const device = realDevice(backend);
+  devices.push(device);
+  return device;
+}
+
+async function signedUpDevice(backend = new FakeBackend()) {
+  const device = newDevice(backend);
+  await device.service.register(EMAIL, PASSWORD);
+  await device.stash.idle();
+  return device;
+}
+
+const type = (label: string, value: string, within_: HTMLElement = document.body) =>
+  fireEvent.input(within(within_).getByLabelText(label), { target: { value } });
+
+describe('Accounts on the real service', () => {
+  it('should create the account, show the recovery code once and open the drawer', async () => {
+    const { app, backend } = await renderRealApp('#/crear-cuenta', newDevice());
+
+    await type('Email', EMAIL);
+    await type('Contraseña', PASSWORD);
+    await fireEvent.click(screen.getByRole('button', { name: 'Crear cuenta' }));
+    await screen.findByRole('heading', { level: 1, name: 'Tu código de recuperación' });
+    const code = app.recoveryCode;
+    await fireEvent.click(screen.getByRole('checkbox'));
+    await fireEvent.click(screen.getByRole('button', { name: 'Continuar' }));
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Pendientes' })).toBeTruthy();
+    expect({ code: /^[0-9A-Z]{28}$/.test(code ?? ''), users: backend.accounts.users.size }).toEqual(
+      { code: true, users: 1 },
+    );
+    expect(app.recoveryCode).toBeNull();
+  });
+
+  it('should say when the password is wrong and enter with the right one', async () => {
+    const phone = await signedUpDevice();
+    await renderRealApp('#/entrar', newDevice(phone.backend));
+
+    await type('Email', EMAIL);
+    await type('Contraseña', 'no-es-esta-clave');
+    await fireEvent.click(screen.getByRole('button', { name: 'Entrar' }));
+    expect(await screen.findByText('El email o la contraseña no son correctos.')).toBeTruthy();
+
+    await type('Contraseña', PASSWORD);
+    await fireEvent.click(screen.getByRole('button', { name: 'Entrar' }));
+    expect(await screen.findByRole('heading', { level: 1, name: 'Pendientes' })).toBeTruthy();
+  });
+
+  it('should log out from the settings and come back to the sign-in screen', async () => {
+    const device = await signedUpDevice();
+    const { app, stash } = await renderRealApp('#/ajustes', device);
+    await screen.findByRole('heading', { name: 'Ajustes' });
+
+    await fireEvent.click(screen.getByRole('button', { name: /Cerrar sesión/ }));
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Entrar' })).toBeTruthy();
+    expect({ session: app.session, items: stash.sync.listItems().length }).toEqual({
+      session: null,
+      items: 0,
+    });
+  });
+
+  it('should change the password from the settings', async () => {
+    const device = await signedUpDevice();
+    await renderRealApp('#/ajustes', device);
+    await screen.findByRole('heading', { name: 'Ajustes' });
+
+    await fireEvent.click(screen.getByRole('button', { name: /Cambiar contraseña/ }));
+    const dialog = await screen.findByRole('dialog', { name: 'Cambiar contraseña' });
+    await fireEvent.click(within(dialog).getByRole('button', { name: 'Cambiar' }));
+    expect(within(dialog).getByText(/Escribe la contraseña actual y la nueva/)).toBeTruthy();
+
+    await type('Contraseña actual', 'no-es-esta-clave', dialog);
+    await type('Contraseña nueva', 'password123', dialog);
+    expect(within(dialog).getByText('Muy común: elige otra')).toBeTruthy();
+    await fireEvent.click(within(dialog).getByRole('button', { name: 'Cambiar' }));
+    expect(within(dialog).getByText(/al menos 10 caracteres/)).toBeTruthy();
+
+    await type('Contraseña nueva', 'pimiento-rojo-asado', dialog);
+    await fireEvent.click(within(dialog).getByRole('button', { name: 'Cambiar' }));
+    expect(await within(dialog).findByText('La contraseña no es correcta.')).toBeTruthy();
+
+    await type('Contraseña actual', PASSWORD, dialog);
+    await fireEvent.click(within(dialog).getByRole('button', { name: 'Cambiar' }));
+    expect(await screen.findByText(/Contraseña cambiada/)).toBeTruthy();
+
+    const laptop = newDevice(device.backend);
+    await laptop.service.login(EMAIL, 'pimiento-rojo-asado');
+    expect((await laptop.service.getSession())?.email).toBe(EMAIL);
+  });
+});
+
+describe('Saving and reading on the real service', () => {
+  it('should save a shared link at once and read its page on the device', async () => {
+    const device = await signedUpDevice();
+    device.backend.pages.set(
+      ARTICLE,
+      webPage(ARTICLE, 'Cómo ordenar la despensa', ['Garbanzos, lentejas y arroz en botes.']),
+    );
+    const { app, stash } = await renderRealApp(`?share=${encodeURIComponent(ARTICLE)}#/`, device);
+
+    const sheet = await screen.findByRole('dialog', { name: /Guardado:/ });
+    await fireEvent.keyDown(sheet, { key: 'Escape' });
+    await waitFor(() => expect(app.sheet).toBeNull());
+    await stash.idle();
+    const saved = await waitFor(() => {
+      const item = app.items.find((entry) => entry.url === ARTICLE);
+      expect(item?.title).toBe('Cómo ordenar la despensa');
+      return item;
+    });
+    app.router.go({ name: 'item', id: saved?.id ?? '' });
+
+    expect(
+      await screen.findByRole('heading', { level: 1, name: 'Cómo ordenar la despensa' }),
+    ).toBeTruthy();
+    expect(screen.getByText(/lentejas y arroz/)).toBeTruthy();
+    expect(document.querySelector('script')).toBeNull();
+  });
+
+  it('should keep a link shared offline in the queue', async () => {
+    const device = await signedUpDevice();
+    device.backend.online = false;
+
+    await renderRealApp(`?share=${encodeURIComponent(ARTICLE)}#/`, device);
+
+    expect(await screen.findByRole('dialog', { name: /En cola|Guardado/ })).toBeTruthy();
+    expect(device.stash.sync.pendingUploads()).toBe(1);
+  });
+
+  it('should say a change needs the network and stay on the item', async () => {
+    const device = await signedUpDevice();
+    const saved = await device.service.save(ARTICLE);
+    await device.stash.idle();
+    const { app } = await renderRealApp(`#/leer/${saved.id}`, device);
+    await waitFor(() => expect(app.router.route.name).toBe('item'));
+    device.backend.online = false;
+
+    await app.markRead(saved.id);
+
+    expect(await screen.findByRole('alert')).toBeTruthy();
+    expect(screen.getByRole('alert').textContent).toMatch(/Sin conexión/);
+    await fireEvent.click(screen.getByRole('button', { name: 'Cerrar aviso' }));
+    expect(app.failure).toBeNull();
+  });
+});

@@ -232,6 +232,24 @@ describe('createSyncClient', () => {
       });
     });
 
+    it.each([
+      { status: 503, code: 'INTERNAL_ERROR' },
+      { status: 429, code: 'RATE_LIMITED' },
+      { status: 401, code: 'UNAUTHORIZED' },
+    ])('should queue the save when the server answers $code', async (error) => {
+      const { client, server } = await setUp();
+      server.nextError = error;
+
+      const saved = await client.saveLink({ url: URL_A });
+      await client.sync();
+
+      expect({
+        queued: saved.queued,
+        rows: server.rows().size,
+        pending: client.pendingUploads(),
+      }).toEqual({ queued: true, rows: 1, pending: 0 });
+    });
+
     it('should not duplicate a queued save whose first upload answer was lost', async () => {
       const { client, server, network } = await setUp();
       network.online = false;

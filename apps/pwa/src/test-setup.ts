@@ -1,3 +1,6 @@
+import { FastKdfWorker } from '@stash/client/testing';
+import { vi } from 'vitest';
+
 // jsdom gaps used by the components.
 if (!window.matchMedia) {
   window.matchMedia = (query: string) =>
@@ -46,4 +49,15 @@ if (!HTMLDialogElement.prototype.showModal) {
     this.open = false;
     this.dispatchEvent(new Event('close'));
   };
+}
+
+// Argon2id runs in a module Web Worker, which jsdom lacks: derivations go through a
+// fast stand-in; the rest of the key chain is the real one.
+vi.stubGlobal('Worker', FastKdfWorker);
+
+// jsdom has no object URLs; thumbnails only need a distinct blob: URL per image.
+if (!URL.createObjectURL) {
+  let next = 0;
+  URL.createObjectURL = () => `blob:stash/${++next}`;
+  URL.revokeObjectURL = () => {};
 }

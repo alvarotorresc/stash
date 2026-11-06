@@ -25,7 +25,9 @@
     busy = true;
     error = undefined;
     try {
-      await app.service.recover(email, code, password);
+      // The old code no longer works: the new one is shown once, like at sign-up.
+      const { recoveryCode } = await app.service.recover(email, code, password);
+      app.recoveryCode = recoveryCode;
     } catch (failure) {
       error = accountMessage(failure);
     } finally {

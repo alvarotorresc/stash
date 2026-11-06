@@ -3,6 +3,7 @@
   import { useApp } from '../lib/app.svelte';
   import { shortDate } from '../lib/format';
   import { AccountError } from '../lib/service';
+  import ChangePassword from './ChangePassword.svelte';
 
   const app = useApp();
 
@@ -11,6 +12,8 @@
   let error = $state<string | undefined>(undefined);
   let busy = $state(false);
   let exportFailed = $state(false);
+  let changingPassword = $state(false);
+  let passwordChanged = $state(false);
 
   async function exportAll() {
     exportFailed = false;
@@ -66,7 +69,21 @@
         ? `Este dispositivo te recuerda hasta el ${shortDate(app.session.rememberedUntil)}`
         : undefined}
     />
+    <SettingsRow
+      icon="edit"
+      label="Cambiar contraseña"
+      description="Pide la actual. Tus datos siguen igual."
+      onclick={() => {
+        passwordChanged = false;
+        changingPassword = true;
+      }}
+    />
   </SettingsGroup>
+  {#if passwordChanged}
+    <p class="done" role="status">
+      Contraseña cambiada. Los demás dispositivos tendrán que entrar.
+    </p>
+  {/if}
 
   <SettingsGroup title="Organizar">
     <SettingsRow
@@ -112,6 +129,15 @@
   <p class="foot">Stash · código abierto, AGPL-3.0</p>
 </main>
 
+<ChangePassword
+  open={changingPassword}
+  onclose={() => (changingPassword = false)}
+  ondone={() => {
+    changingPassword = false;
+    passwordChanged = true;
+  }}
+/>
+
 <Dialog open={deleting} title="Borrar la cuenta" onclose={() => (deleting = false)}>
   <form class="del" onsubmit={confirmDelete}>
     <p>
@@ -140,13 +166,17 @@
     overscroll-behavior: contain;
   }
   .foot,
+  .done,
   .error {
     margin: 0 20px;
     color: var(--muted);
     font-size: var(--fs-meta);
   }
-  .error {
+  .error,
+  .done {
     margin-bottom: 16px;
+  }
+  .error {
     color: var(--danger);
   }
   .del {
