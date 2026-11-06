@@ -452,6 +452,16 @@ describe('createStash', () => {
       expect(calls).toBe(1);
     });
 
+    it('should start once per session, however often the screens ask', async () => {
+      const { backend, phone } = await registered();
+      const pulls = backend.records.pulls;
+
+      await Promise.all([phone.stash.start(), phone.stash.start()]);
+      await phone.stash.idle();
+
+      expect(backend.records.pulls).toBe(pulls);
+    });
+
     it('should do nothing on refresh while locked', async () => {
       const backend = new FakeBackend();
       const { stash } = device(backend);

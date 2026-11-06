@@ -71,7 +71,10 @@ export interface Stash {
   logout(): Promise<void>;
   deleteAccount(input: { password: string }): Promise<void>;
 
-  /** Loads the local cache (works offline), then syncs and reads pending links in the background. */
+  /**
+   * Loads the local cache (works offline), then syncs and reads pending links in the background.
+   * Once per unlocked session: calling it again returns the same start.
+   */
   start(): Promise<void>;
   /** Uploads the queue, pulls changes and reads links still unread. Never throws. */
   refresh(): Promise<void>;
@@ -122,6 +125,8 @@ export function createStash(options: StashOptions = {}): Stash {
   // The unlocked data key, kept in memory once read: it is a non-extractable CryptoKey.
   let dataKey: DataKey | null = null;
   let opened: Promise<void> | null = null;
+  /** The running session's start: once per unlock, so a reload of the screens never repeats it. */
+  let started: Promise<void> | null = null;
   const reading = new Set<string>();
   const background = new Set<Promise<unknown>>();
   let writes: Promise<unknown> = Promise.resolve();
@@ -154,6 +159,7 @@ export function createStash(options: StashOptions = {}): Stash {
     onLogout: async () => {
       dataKey = null;
       opened = null;
+      started = null;
       await sync.clear();
     },
   });
@@ -171,6 +177,7 @@ export function createStash(options: StashOptions = {}): Stash {
     const stored = await sessionStore.load();
     if (stored === null) return;
     await sessionStore.save({ ...stored, token: '', expiresAt: 0 });
+    started = null;
     notify();
   }
 
@@ -246,9 +253,16 @@ export function createStash(options: StashOptions = {}): Stash {
     return opened;
   }
 
-  async function start(): Promise<void> {
-    await open();
-    void track(refresh());
+  function start(): Promise<void> {
+    if (started === null) {
+      started = open().then(() => {
+        void track(refresh());
+      });
+      started.catch(() => {
+        started = null;
+      });
+    }
+    return started;
   }
 
   async function session(): Promise<UnlockedSession | null> {
@@ -271,6 +285,7 @@ export function createStash(options: StashOptions = {}): Stash {
       opened = null;
       await sync.clear();
     }
+    started = null;
   }
 
   async function afterSignIn(key: DataKey): Promise<void> {
