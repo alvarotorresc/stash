@@ -2,7 +2,7 @@ import { env } from 'cloudflare:workers';
 import { API_PATHS, toBase64Url } from '@stash/core/protocol';
 import { describe, expect, it } from 'vitest';
 import { hmac } from '../src/accounts/hashing';
-import { LIMITS, clientIp } from '../src/accounts/rate-limit';
+import { LIMITS, clientIp, createExtractRateLimiter } from '../src/accounts/rate-limit';
 import {
   accountSetup,
   call,
@@ -191,5 +191,21 @@ describe('clientIp', () => {
 
   it('should fall back to a shared bucket without the header', () => {
     expect(ipOf()).toBe('unknown');
+  });
+});
+
+describe('createExtractRateLimiter', () => {
+  it('should let an account through up to its limit and refuse it after', async () => {
+    const limiter = createExtractRateLimiter(env.DB, env.PEPPER);
+    const results: boolean[] = [];
+    for (let index = 0; index <= LIMITS.extract.account.max; index++) {
+      results.push((await limiter.limit({ key: 'account-a' })).success);
+    }
+
+    expect({
+      allowed: results.filter(Boolean).length,
+      last: results.at(-1),
+      other: (await limiter.limit({ key: 'account-b' })).success,
+    }).toEqual({ allowed: LIMITS.extract.account.max, last: false, other: true });
   });
 });

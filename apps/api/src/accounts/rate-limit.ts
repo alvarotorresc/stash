@@ -1,4 +1,5 @@
 import { toBase64Url } from '@stash/core/protocol';
+import type { RateLimiter } from '../rate-limit';
 import { ApiError } from './errors';
 import { hmac } from './hashing';
 
@@ -10,6 +11,7 @@ export interface Limit {
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
+const DAY = 24 * HOUR;
 
 /**
  * Limits per action. Each request counts against every bucket of its action: the global one
@@ -35,13 +37,18 @@ export const LIMITS = {
   },
   /** Authenticated actions that take a login key as proof: password change, upgrade, delete. */
   proof: { account: { max: 10, windowMs: HOUR } },
+  /**
+   * Extraction proxy, per account, with a daily global cap well under the Workers request quota
+   * so a burst of new accounts cannot starve every other route.
+   */
+  extract: { global: { max: 30_000, windowMs: DAY }, account: { max: 60, windowMs: 10 * MINUTE } },
 } as const satisfies Record<string, Partial<Record<Bucket, Limit>>>;
 
 export type Action = keyof typeof LIMITS;
 type Bucket = 'global' | 'ip' | 'email' | 'account';
 
 /** Rows older than the longest window are dead and can be deleted. */
-export const LONGEST_WINDOW_MS = HOUR;
+export const LONGEST_WINDOW_MS = DAY;
 
 /** The values a request is counted under; the global bucket needs none. */
 export interface Subjects {
@@ -58,16 +65,17 @@ ON CONFLICT (key) DO UPDATE SET
 RETURNING count, window_start`;
 
 /**
- * Counts the request in every bucket of the action in one atomic batch, before any other work,
- * and throws a 429 when any bucket is over its limit. Subjects are stored as HMACs.
+ * Counts the request in every bucket of the action in one atomic batch and returns how long to
+ * wait when any bucket is over its limit, or 0 when the request may go ahead. Subjects are
+ * stored as HMACs.
  */
-export async function enforceRateLimit(
+export async function countRequest(
   db: D1Database,
   pepper: string,
   action: Action,
   subjects: Subjects,
   now = Date.now(),
-): Promise<void> {
+): Promise<number> {
   const limits: Partial<Record<Bucket, Limit>> = LIMITS[action];
   const buckets: { limit: Limit; key: string }[] = [];
   for (const [bucket, limit] of Object.entries(limits) as [Bucket, Limit][]) {
@@ -89,11 +97,32 @@ export async function enforceRateLimit(
       retryAfterMs = Math.max(retryAfterMs, row.window_start + limit.windowMs - now);
     }
   });
+  return retryAfterMs;
+}
+
+/** Counts the request before any other work and throws a 429 with Retry-After when over. */
+export async function enforceRateLimit(
+  db: D1Database,
+  pepper: string,
+  action: Action,
+  subjects: Subjects,
+  now = Date.now(),
+): Promise<void> {
+  const retryAfterMs = await countRequest(db, pepper, action, subjects, now);
   if (retryAfterMs > 0) {
     throw new ApiError('RATE_LIMITED', 'Too many requests, try again later', 429, {
       'Retry-After': String(Math.ceil(retryAfterMs / 1000)),
     });
   }
+}
+
+/** The extraction limits as a `RateLimiter`, keyed by account id, counted in D1. */
+export function createExtractRateLimiter(db: D1Database, pepper: string): RateLimiter {
+  return {
+    async limit({ key }) {
+      return { success: (await countRequest(db, pepper, 'extract', { account: key })) === 0 };
+    },
+  };
 }
 
 /**
