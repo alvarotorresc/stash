@@ -34,12 +34,17 @@ export function kdfOf(row: Pick<UserRow, 'kdf_memory_kib' | 'kdf_iterations'>): 
 }
 
 /**
- * Every statement that removes an account's rows, dependants first. Any table that stores rows
- * of an account (such as the encrypted records) must add its statement here, so deleting the
- * account removes everything in one batch, which D1 runs as a single transaction.
+ * Every statement that deletes an account, run in one batch, which D1 runs as a single
+ * transaction. The account stops existing at once: its user row (with the wrapped data keys),
+ * its sessions and its record counts go, and a tombstone keeps its id from ever being used
+ * again. Its records are left to the daily sweep, which purges a bounded number per run (see
+ * `sweep.ts`): deleting them here could write a whole account of rows at once. Until then no
+ * session can reach them and they stay encrypted under a key nobody holds any more. Any new table
+ * of a small, bounded number of rows per account adds its statement here; one that can grow with
+ * the account is purged by the sweep instead.
  */
 export const DELETE_ACCOUNT_STATEMENTS = [
-  'DELETE FROM records WHERE user_id = ?1',
+  'INSERT INTO deleted_users (id) VALUES (?1)',
   'DELETE FROM record_counts WHERE user_id = ?1',
   'DELETE FROM sessions WHERE user_id = ?1',
   'DELETE FROM users WHERE id = ?1',

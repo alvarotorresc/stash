@@ -16,6 +16,7 @@ import {
 } from '@stash/core/sync-protocol';
 import { describe, expect, it } from 'vitest';
 import { LIMITS } from '../src/accounts/rate-limit';
+import { CREATE, PUT } from '../src/records/routes';
 import { call, dataOf, errorOf, randomKey, register } from './helpers';
 
 /** A random-looking base64url blob of `bytes` decoded bytes (getRandomValues caps at 64 KiB). */
@@ -424,31 +425,92 @@ describe('/api/records', () => {
   });
 
   describe('account deletion', () => {
-    it('should delete the records and counters of the account only', async () => {
+    async function deleteAccount(token: string, loginKey: string): Promise<void> {
+      await dataOf(await call(API_PATHS.account, { method: 'DELETE', token, body: { loginKey } }));
+    }
+
+    it('should make the records unreachable at once and leave them encrypted for the purge', async () => {
       const a = await register();
       const b = await register();
-      await push(a.token, [create(), create()]);
+      const sent = [create(), create()];
+      await push(a.token, sent);
       await push(b.token, [create()]);
       const aId = await userIdOf(a.token);
 
-      await dataOf(
-        await call(API_PATHS.account, {
-          method: 'DELETE',
-          token: a.token,
-          body: { loginKey: a.keys.loginKey },
-        }),
-      );
+      await deleteAccount(a.token, a.keys.loginKey);
+      const { results } = await env.DB.prepare(
+        'SELECT blob FROM records WHERE user_id = ? ORDER BY version',
+      )
+        .bind(aId)
+        .all<{ blob: string }>();
       const left = await env.DB.prepare(
-        `SELECT (SELECT count(*) FROM records WHERE user_id = ?1) AS records,
-                (SELECT count(*) FROM record_counts WHERE user_id = ?1) AS counts`,
+        `SELECT (SELECT count(*) FROM record_counts WHERE user_id = ?1) AS counts,
+                (SELECT count(*) FROM users WHERE id = ?1) AS users,
+                (SELECT count(*) FROM deleted_users WHERE id = ?1) AS tombstones`,
       )
         .bind(aId)
         .first();
 
-      expect({ left, b: (await pull(b.token)).records.length }).toEqual({
-        left: { records: 0, counts: 0 },
+      expect({
+        pull: (await call(RECORDS_PATH, { token: a.token })).status,
+        push: (await pushRaw(a.token, { operations: [create()] })).status,
+        // The device's ciphertext, as sent: its data key was only wrapped in the deleted user.
+        pending: results.map(({ blob }) => blob),
+        left,
+        b: (await pull(b.token)).records.length,
+      }).toEqual({
+        pull: 401,
+        push: 401,
+        pending: sent.map(({ blob }) => blob),
+        left: { counts: 0, users: 0, tombstones: 1 },
         b: 1,
       });
+    });
+
+    it('should never give the id of a deleted account to a new account', async () => {
+      const { token, keys } = await register();
+      const id = await userIdOf(token);
+      await deleteAccount(token, keys.loginKey);
+
+      const reuse = env.DB.prepare(
+        `INSERT INTO users (id, email, salt, kdf_memory_kib, kdf_iterations, kdf_parallelism,
+           login_key_hash, recovery_key_hash, wrapped_data_key, recovery_wrapped_data_key,
+           created_at, updated_at)
+         VALUES (?, 'reuse@example.com', 's', 1, 1, 1, 'l', 'r', 'w', 'rw', 0, 0)`,
+      )
+        .bind(id)
+        .run();
+
+      await expect(reuse).rejects.toThrow(/deleted account/);
+    });
+
+    it('should refuse records for an account that does not exist', async () => {
+      const { token, keys } = await register();
+      const id = await userIdOf(token);
+      await deleteAccount(token, keys.loginKey);
+
+      // A push that passed its session check just before the deletion committed.
+      const late = env.DB.prepare(CREATE)
+        .bind(id, crypto.randomUUID(), 'item', blob(), 64, 0)
+        .run();
+
+      await expect(late).rejects.toThrow(/no account/);
+    });
+
+    it('should refuse a late put on a record the deleted account already had', async () => {
+      const { token, keys } = await register();
+      const id = await userIdOf(token);
+      const kept = create();
+      await push(token, [kept]);
+      await deleteAccount(token, keys.loginKey);
+
+      const late = env.DB.prepare(PUT).bind(id, kept.id, 'item', blob(), 64, 0).run();
+
+      await expect(late).rejects.toThrow(/no account/);
+    });
+
+    it('should enforce foreign keys', async () => {
+      expect(await env.DB.prepare('PRAGMA foreign_keys').first('foreign_keys')).toBe(1);
     });
   });
 

@@ -46,7 +46,7 @@ describe('DELETE /api/account', () => {
     });
   });
 
-  it('should delete the records of the account and their counts', async () => {
+  it('should delete the record counts of the account and leave its records to the purge', async () => {
     const { keys, token } = await register();
     const other = await register();
     const operations = [
@@ -63,7 +63,7 @@ describe('DELETE /api/account', () => {
               (SELECT count(*) FROM record_counts) AS counts`,
     ).first<{ records: number; counts: number }>();
 
-    expect(left).toEqual({ records: 1, counts: 1 });
+    expect(left).toEqual({ records: 2, counts: 1 });
   });
 
   it('should delete the rate limit counters tied to the account', async () => {

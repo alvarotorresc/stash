@@ -1,9 +1,29 @@
--- Encrypted records (items, categories and tags) and their per-account counters.
+-- Encrypted records (items, categories and tags), their per-account counters and the tombstones
+-- of deleted accounts.
 -- The server never sees what a record holds: `blob` is AES-256-GCM ciphertext made on the device,
 -- in base64url. Only the id, kind, version, size and dates are visible.
 
+-- Ids of deleted accounts, kept for good: an id is never given to a new account, and the daily
+-- sweep purges the records each one left behind, a bounded number per run. Without a rowid, a
+-- tombstone writes one row.
+CREATE TABLE deleted_users (
+  id TEXT PRIMARY KEY
+) STRICT, WITHOUT ROWID;
+
+CREATE TRIGGER users_id_not_reused BEFORE INSERT ON users
+WHEN EXISTS (SELECT 1 FROM deleted_users WHERE id = NEW.id)
+BEGIN
+  SELECT RAISE(ABORT, 'the id of a deleted account is never used again');
+END;
+
+-- No foreign key on `user_id`: deleting a user would cascade to every record in the same
+-- transaction, up to a full account of rows at once, which could spend the daily D1 write quota.
+-- Deleting an account removes the user and its sessions at once; its records stay, unreachable
+-- (no session can name the id again) and still encrypted under a key wrapped only in the deleted
+-- user row, until the sweep purges them. The trigger below keeps a record from naming a user
+-- that does not exist, such as a push that passed its session check just before the deletion.
 CREATE TABLE records (
-  user_id TEXT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL,
   -- Random UUID generated on the client. Unique per account, so ids of two accounts never meet.
   id TEXT NOT NULL,
   kind TEXT NOT NULL CHECK (kind IN ('item', 'category', 'tag')),
@@ -23,7 +43,14 @@ CREATE TABLE records (
 -- Pull by cursor: the account's changes after a version, in order. Also keeps versions unique.
 CREATE UNIQUE INDEX records_user_version ON records (user_id, version);
 
+CREATE TRIGGER records_need_user BEFORE INSERT ON records
+WHEN NOT EXISTS (SELECT 1 FROM users WHERE id = NEW.user_id)
+BEGIN
+  SELECT RAISE(ABORT, 'no account for this record');
+END;
+
 -- Rows and blob bytes per account, kept exact by the triggers below, for the account quotas.
+-- Deleted with its account (one row), so purging the records afterwards updates nothing here.
 CREATE TABLE record_counts (
   user_id TEXT PRIMARY KEY REFERENCES users (id) ON DELETE CASCADE,
   records INTEGER NOT NULL,
