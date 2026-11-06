@@ -44,6 +44,11 @@ describe('extractSharedUrl', () => {
     expect(extractSharedUrl({ text: '(ver https://ok.example/p)' })).toBe('https://ok.example/p');
   });
 
+  it('should drop a link with an endless tail instead of trimming it', () => {
+    expect(extractSharedUrl({ text: `https://a.example/${')'.repeat(200_000)}` })).toBeNull();
+    expect(extractSharedUrl({ text: `https://a.example/${'.'.repeat(200_000)}x` })).toBeNull();
+  });
+
   it('should reject links that are not http or https', () => {
     expect(extractSharedUrl({ url: 'javascript:alert(1)' })).toBeNull();
     expect(extractSharedUrl({ url: 'file:///etc/passwd', text: 'data:text/html,hola' })).toBeNull();

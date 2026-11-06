@@ -50,7 +50,9 @@ export function extractSharedUrl(fields: { url?: string | null; text?: string | 
   const direct = toHttpUrl(fields.url);
   if (direct) return direct;
   const match = URL_IN_TEXT.exec(fields.text ?? '');
-  return match ? toHttpUrl(trimTrailing(match[0])) : null;
+  // Too long to be valid anyway; checked first so trimming stays cheap.
+  if (!match || match[0].length > MAX_LENGTH) return null;
+  return toHttpUrl(trimTrailing(match[0]));
 }
 
 const asString = (value: FormDataEntryValue | null) => (typeof value === 'string' ? value : null);
