@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ReaderInputError } from './errors';
-import { minimalResult, safely } from './result';
+import { excerpt, minimalResult, safely } from './result';
 
 describe('minimalResult', () => {
   it('should return the url and source with nothing else', () => {
@@ -30,5 +30,13 @@ describe('safely', () => {
       throw new Error('boom');
     });
     expect([result.url, result.issues]).toEqual(['https://example.com/a', ['unexpected_error']]);
+  });
+});
+
+describe('excerpt', () => {
+  it('should flatten, clean and cap the text without splitting surrogate pairs', () => {
+    const out = excerpt(`one\ntwo‮ ${'😀'.repeat(10)}`, 10);
+    expect(out).toBe('one two…');
+    expect(() => encodeURIComponent(out ?? '')).not.toThrow();
   });
 });

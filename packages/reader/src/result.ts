@@ -1,3 +1,4 @@
+import { cleanText } from './meta';
 import { detectSource } from './source';
 import type { ReaderIssue, ReaderResult, Source } from './types';
 import { parseHttpUrl } from './url';
@@ -40,7 +41,5 @@ export function safely(url: string, parse: (href: string, source: Source) => Rea
 
 /** Short excerpt of a text, for the description of sources that have none. */
 export function excerpt(text: string, max = 300): string | null {
-  const flat = text.replace(/\s+/g, ' ').trim();
-  if (!flat) return null;
-  return flat.length > max ? `${flat.slice(0, max - 1).trimEnd()}…` : flat;
+  return cleanText(text, max);
 }

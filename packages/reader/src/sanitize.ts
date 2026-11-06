@@ -1,4 +1,5 @@
 import DOMPurify, { type Config, type DOMPurify as Purifier } from 'dompurify';
+import { normalizeText } from './text';
 import { resolveHttpUrl } from './url';
 
 /** Attribute that keeps the original image URL of an `<img>` without letting it load. */
@@ -159,13 +160,4 @@ export function htmlToText(html: string): string {
     if (BLOCK_TAGS.has(element.tagName)) element.after(doc.createTextNode('\n'));
   }
   return normalizeText(doc.body.textContent ?? '');
-}
-
-/** Collapses whitespace inside lines and drops empty lines. */
-export function normalizeText(text: string): string {
-  return text
-    .split('\n')
-    .map((line) => line.replace(/\s+/g, ' ').trim())
-    .filter((line) => line.length > 0)
-    .join('\n');
 }

@@ -21,3 +21,14 @@ describe('toIsoDate', () => {
     expect(toIsoDate(value)).toBe(expected);
   });
 });
+
+describe('cleanText with spoofing characters', () => {
+  it('should remove bidi overrides and control characters', () => {
+    expect(cleanText('invoice‮fdp.exe\u0007')).toBe('invoicefdp.exe');
+  });
+
+  it('should not split a surrogate pair when capping', () => {
+    const out = cleanText(`abc${'😀'.repeat(10)}`, 5) ?? '';
+    expect(() => encodeURIComponent(out)).not.toThrow();
+  });
+});

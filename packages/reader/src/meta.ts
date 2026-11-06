@@ -1,4 +1,4 @@
-import { normalizeText } from './sanitize';
+import { normalizeText, truncate } from './text';
 import { resolveHttpUrl } from './url';
 
 export interface PageMeta {
@@ -14,12 +14,15 @@ export interface PageMeta {
 const MAX_SHORT = 300;
 const MAX_LONG = 1000;
 
-/** Trims, collapses whitespace and caps the length of a value from untrusted content. */
+/**
+ * Trims, collapses whitespace, removes control and bidi characters and caps the length of a value
+ * from untrusted content.
+ */
 export function cleanText(value: string | null | undefined, max = MAX_SHORT): string | null {
   if (!value) return null;
   const text = normalizeText(value.replace(/\n/g, ' '));
   if (!text) return null;
-  return text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text;
+  return truncate(text, max);
 }
 
 /** Normalizes a date to ISO 8601, or `null` if it does not parse. */
