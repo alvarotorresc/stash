@@ -29,7 +29,10 @@ export interface ReaderResult {
   source: Source;
   /** The URL the user saved. Always present. */
   url: string;
-  /** Canonical URL announced by the page (http/https only), or `url` when there is none. */
+  /**
+   * Canonical URL announced by the page (http/https only) when it is on the same site as `url`;
+   * otherwise `url`. To open the original or show its domain, use `url`.
+   */
   canonicalUrl: string;
   title: string | null;
   description: string | null;

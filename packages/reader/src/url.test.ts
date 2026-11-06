@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isPrivateHost, resolvePublicHttpUrl } from './url';
+import { isPrivateHost, resolvePublicHttpUrl, sameSiteCanonical } from './url';
 
 const BASE = 'https://blog.example.com/posts/one';
 
@@ -64,5 +64,31 @@ describe('resolvePublicHttpUrl', () => {
       resolvePublicHttpUrl('/img/a.png'),
       resolvePublicHttpUrl('https://cdn.example.com/a.png'),
     ]).toEqual([null, 'https://cdn.example.com/a.png']);
+  });
+});
+
+describe('sameSiteCanonical', () => {
+  const URL_ = 'https://blog.example.com/posts/one';
+
+  it.each([
+    'https://blog.example.com/posts/one-canonical',
+    'https://example.com/posts/one',
+    'https://www.blog.example.com/posts/one',
+    'http://BLOG.example.com./posts/one',
+  ])('should keep the canonical %s on the same site', (canonical) => {
+    expect(sameSiteCanonical(canonical, URL_)).toBe(canonical);
+  });
+
+  it.each([
+    'https://paypal.com/login',
+    'https://shop.example.com/x',
+    'https://example.com.evil.net/',
+    'https://com/',
+  ])('should fall back to the url for %s', (canonical) => {
+    expect(sameSiteCanonical(canonical, URL_)).toBe(URL_);
+  });
+
+  it('should fall back to the url when there is no canonical', () => {
+    expect(sameSiteCanonical(null, URL_)).toBe(URL_);
   });
 });

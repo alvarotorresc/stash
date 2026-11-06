@@ -4,7 +4,7 @@ import { cleanText, toIsoDate } from './meta';
 import { excerpt, minimalResult, safely } from './result';
 import { htmlToText, sanitizeHtml } from './sanitize';
 import type { ReaderContent, ReaderResult } from './types';
-import { resolveHttpUrl } from './url';
+import { resolveHttpUrl, sameSiteCanonical } from './url';
 
 function child(parent: Element | null | undefined, name: string): Element | null {
   if (!parent) return null;
@@ -64,7 +64,10 @@ export function parseRedditRss(xml: string, url: string): ReaderResult {
     return {
       source,
       url: href,
-      canonicalUrl: resolveHttpUrl(child(entry, 'link')?.getAttribute('href'), href) ?? href,
+      canonicalUrl: sameSiteCanonical(
+        resolveHttpUrl(child(entry, 'link')?.getAttribute('href'), href),
+        href,
+      ),
       title: cleanText(childText(entry, 'title')),
       description: excerpt(content.text) ?? cleanText(subreddit),
       author: cleanAuthor(childText(child(entry, 'author'), 'name')),

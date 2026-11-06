@@ -2,9 +2,10 @@ import { parseHtmlPage } from './dom';
 import { ReaderInputError } from './errors';
 import { cleanText, extractMeta, type PageMeta } from './meta';
 import { excerpt, safely } from './result';
+import { detectSource } from './source';
 import { htmlToText, sanitizeHtml } from './sanitize';
 import type { ReaderContent, ReaderIssue, ReaderResult } from './types';
-import { resolveHttpUrl } from './url';
+import { resolveHttpUrl, sameSiteCanonical } from './url';
 
 interface XOembed {
   html: string;
@@ -89,6 +90,15 @@ function readTweet(
   };
 }
 
+/**
+ * The post URL from oEmbed, only when it is on X itself. `x.com` and `twitter.com` count as the same
+ * site here, since oEmbed often answers with one for a link saved with the other.
+ */
+function oembedCanonical(value: string | null | undefined, url: string): string | null {
+  const resolved = resolveHttpUrl(value, url);
+  return resolved && detectSource(resolved) === 'x' ? resolved : null;
+}
+
 const EMPTY_META: PageMeta = {
   title: null,
   description: null,
@@ -134,7 +144,7 @@ export function parseXOembed(oembed: unknown, url: string, pageHtml?: string): R
     return {
       source,
       url: href,
-      canonicalUrl: resolveHttpUrl(data?.url, href) ?? meta.canonicalUrl ?? href,
+      canonicalUrl: oembedCanonical(data?.url, href) ?? sameSiteCanonical(meta.canonicalUrl, href),
       title: meta.title ?? fallbackTitle,
       description: meta.description ?? excerpt(content.text),
       author: author ?? meta.author,

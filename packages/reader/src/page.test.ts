@@ -71,6 +71,16 @@ describe('parsePage', () => {
     });
   });
 
+  it.each([
+    ['<link rel="canonical" href="https://paypal.com/login">', 'https://blog.example.com/a'],
+    ['<meta property="og:url" content="https://paypal.com/login">', 'https://blog.example.com/a'],
+    ['<link rel="canonical" href="https://example.com/a?b">', 'https://example.com/a?b'],
+  ])('should only trust a canonical url on the same site: %s', (head, expected) => {
+    expect(
+      parsePage(`<head>${head}</head><p>x</p>`, 'https://blog.example.com/a').canonicalUrl,
+    ).toBe(expected);
+  });
+
   it('should read a page without <body>', () => {
     const result = parsePage(NO_BODY_HTML, 'https://danluu.example.com/post/');
     expect([

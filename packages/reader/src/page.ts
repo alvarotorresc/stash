@@ -5,6 +5,7 @@ import { cleanText, extractMeta, toIsoDate } from './meta';
 import { safely } from './result';
 import { htmlToText, sanitizeHtml } from './sanitize';
 import type { ReaderContent, ReaderIssue, ReaderResult, Source } from './types';
+import { sameSiteCanonical } from './url';
 import { parseXOembed } from './x';
 
 function readArticle(
@@ -42,7 +43,7 @@ function parseWithReadability(html: string, url: string, source: Source): Reader
     return {
       source,
       url,
-      canonicalUrl: meta.canonicalUrl ?? url,
+      canonicalUrl: sameSiteCanonical(meta.canonicalUrl, url),
       title: meta.title,
       description: meta.description,
       author: meta.author,
@@ -57,7 +58,7 @@ function parseWithReadability(html: string, url: string, source: Source): Reader
   return {
     source,
     url,
-    canonicalUrl: meta.canonicalUrl ?? url,
+    canonicalUrl: sameSiteCanonical(meta.canonicalUrl, url),
     title: meta.title ?? article.title,
     description: meta.description ?? article.excerpt,
     author: meta.author ?? article.byline,

@@ -43,6 +43,14 @@ describe('parseRedditRss', () => {
     expect(result.description).toBe('First paragraph of the post. Read the rules. Second line.');
   });
 
+  it('should ignore an entry link outside Reddit', () => {
+    const forged = REDDIT_RSS.replace(
+      '<link href="https://www.reddit.com/r/example/comments/abc123/a_title/" />',
+      '<link href="https://paypal.com/login" />',
+    );
+    expect(parseRedditRss(forged, URL_).canonicalUrl).toBe(URL_);
+  });
+
   it('should tolerate a deleted author', () => {
     const deleted = parseRedditRss(REDDIT_RSS_DELETED_AUTHOR, URL_);
     expect([deleted.author, deleted.publishedAt, deleted.content.kind]).toEqual([

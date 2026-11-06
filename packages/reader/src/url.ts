@@ -112,3 +112,23 @@ export function normalizedHost(url: URL): string {
 export function isHostOf(host: string, domain: string): boolean {
   return host === domain || host.endsWith(`.${domain}`);
 }
+
+/**
+ * Returns `candidate` (a canonical URL announced by untrusted content) only when it is on the same
+ * site as `url`, the URL the user saved; otherwise `url`. Without a public suffix list, "same site"
+ * is approximated strictly: same host, or one host is a subdomain of the other (`example.com` and
+ * `blog.example.com`). Sibling subdomains (`shop.example.com`) fall back to `url`, which is safe.
+ * This stops a page from passing itself off as another domain or colliding with another save.
+ */
+export function sameSiteCanonical(candidate: string | null, url: string): string {
+  if (!candidate) return url;
+  try {
+    const a = normalizedHost(new URL(candidate));
+    const b = normalizedHost(new URL(url));
+    const related = isHostOf(a, b) || isHostOf(b, a);
+    const shorter = a.length < b.length ? a : b;
+    return related && shorter.includes('.') ? candidate : url;
+  } catch {
+    return url;
+  }
+}

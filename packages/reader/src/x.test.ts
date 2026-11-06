@@ -7,6 +7,11 @@ import { parseOembedDate, parseXOembed } from './x';
 const URL_ = 'https://twitter.com/example/status/20';
 
 describe('parseXOembed', () => {
+  it('should ignore an oEmbed url outside X', () => {
+    const result = parseXOembed({ ...X_OEMBED, url: 'https://paypal.com/login' }, URL_);
+    expect(result.canonicalUrl).toBe(URL_);
+  });
+
   it('should read text, author and date from oEmbed', () => {
     const result = parseXOembed(X_OEMBED, URL_);
     expect(result).toMatchObject({
