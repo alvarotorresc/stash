@@ -130,7 +130,9 @@ every request (the attacker rotates them), so each costs its insert and its late
 | Extraction: 10 000 × 2                                    | 20 000     |
 | **Worst case**                                            | **65 200** |
 
-That leaves about 35 000 rows a day for sync and the daily sweep. Extraction assumes an
+That leaves about 35 000 rows a day for sync and the daily sweep. The sweep (a cron trigger at
+04:17 UTC) deletes at most 25 000 rows per table in a run, above what a day of requests can
+leave behind, so a backlog never spends the quota in one go. Extraction assumes an
 account's key is inserted and swept at most once a day: it holds while the accounts that extract
 in a day are few next to the extractions. Any new rate-limited action must be added to the test.
 
