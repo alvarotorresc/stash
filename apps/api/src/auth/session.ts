@@ -4,6 +4,8 @@
  * from the request.
  */
 
+import type { AccountsEnv } from '../accounts/env';
+import { resolveSessionFromRequest } from '../accounts/sessions';
 import { jsonError } from '../http';
 
 export interface Session {
@@ -17,12 +19,15 @@ export type SessionResolver = (request: Request) => Promise<Session | null>;
 export type SessionHandler = (request: Request, session: Session) => Promise<Response>;
 
 /**
- * Production resolver.
- *
- * TODO(F2): verify the session token once accounts and sessions exist. Until then it fails closed:
- * no request has a session, so every private route answers 401.
+ * Production resolver: the account behind the request's bearer token, from the sessions the
+ * account routes open. Unknown, revoked or expired tokens resolve to null (401).
  */
-export const resolveSession: SessionResolver = async () => null;
+export function createSessionResolver(env: AccountsEnv): SessionResolver {
+  return async (request) => {
+    const session = await resolveSessionFromRequest(request, env);
+    return session === null ? null : { accountId: session.userId };
+  };
+}
 
 export function requireSession(
   resolve: SessionResolver,

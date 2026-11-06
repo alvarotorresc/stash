@@ -40,18 +40,26 @@ Outbound requests identify themselves as
 what StashPreview does (it only downloads a page when a user saves a link, stores nothing and
 follows no links) and how to contact the maintainer.
 
-## Pending before sessions are enabled
+## Accounts and sessions
 
-Today every private route answers 401, because the session resolver fails closed, and the rate
-limiter is `allowAll`. Before the real session resolver replaces that stub, the extraction routes
-need real rate limiting, wired in `src/index.ts` in place of `allowAll`:
+The account routes (`/api/auth/*` and `/api/account*`) live in `src/accounts/`. Every private
+route, extraction included, resolves its session from the `Authorization: Bearer` token through
+`createSessionResolver` in `src/auth/session.ts`: unknown, closed or expired tokens answer 401.
 
-- **Per-account limit** on `/api/extract` and `/api/extract/image`, keyed by account id.
-- **Global cap** on extractions across all accounts, as a fixed key in the same limiter, so many
-  accounts at once cannot exhaust the daily Workers request quota and take down sync with it.
-  Registration is free, so the per-account limit only holds if sign-up is itself limited by IP.
-- **Implementation:** the Workers Rate Limiting binding (`[[ratelimits]]` in `wrangler.toml`) if it
-  is available on the Free plan, which is not verified yet. Otherwise, a counter per account and
-  time window in D1 (exact, at the cost of one write per extraction).
-- **Guard test:** a test that fails if the production limiter is still `allowAll` once the session
-  resolver is no longer the fail-closed stub, so sessions cannot ship without it.
+## Rate limiting
+
+Counters live in D1 (`rate_limits`), in fixed windows keyed by an HMAC of the bucket and its
+subject, so neither emails nor IP addresses are stored. Limits are in `src/accounts/rate-limit.ts`:
+
+| Action                                | Global        | Per IP      | Per email or account    |
+| ------------------------------------- | ------------- | ----------- | ----------------------- |
+| Register                              | 300 / hour    | 5 / hour    | -                       |
+| Salt step of the login                | 3000 / 10 min | 30 / 10 min | -                       |
+| Login                                 | 3000 / 10 min | 20 / 10 min | 10 / 10 min per email   |
+| Recovery (both steps)                 | 300 / hour    | 10 / hour   | 5 / hour per email      |
+| Password change, upgrade, deletion    | -             | -           | 10 / hour per account   |
+| Extraction (`/api/extract`, `/image`) | 30 000 / day  | -           | 60 / 10 min per account |
+
+The Workers Rate Limiting binding was not used: it is approximate, per location, and its
+availability on the Free plan is not verified. Over a limit the API answers 429 `RATE_LIMITED`;
+the account routes add `Retry-After`.

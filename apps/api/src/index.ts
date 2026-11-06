@@ -1,16 +1,23 @@
 import { handleAccountsRequest, isAccountsPath } from './accounts/routes';
 import type { AccountsEnv } from './accounts/env';
-import { resolveSession } from './auth/session';
+import { readPepper } from './accounts/env';
+import { createExtractRateLimiter } from './accounts/rate-limit';
+import { createSessionResolver } from './auth/session';
 import { createExtractRoutes, DEFAULT_LIMITS } from './extract/routes';
 import { jsonData, jsonError } from './http';
-import { allowAll } from './rate-limit';
 
-const extractRoutes = createExtractRoutes({
-  fetch: (input, init) => fetch(input, init),
-  resolveSession,
-  rateLimiter: allowAll,
-  limits: DEFAULT_LIMITS,
-});
+/** Extraction routes bound to this request's bindings: real sessions and D1 rate limits. */
+function extractRoutesFor(env: AccountsEnv) {
+  return createExtractRoutes({
+    fetch: (input, init) => fetch(input, init),
+    resolveSession: createSessionResolver(env),
+    rateLimiter: {
+      // Reads the pepper lazily, so a missing secret fails inside the route's error handling.
+      limit: (options) => createExtractRateLimiter(env.DB, readPepper(env)).limit(options),
+    },
+    limits: DEFAULT_LIMITS,
+  });
+}
 
 export default {
   async fetch(request, env): Promise<Response> {
@@ -25,7 +32,7 @@ export default {
 
     if (isAccountsPath(pathname)) return handleAccountsRequest(request, env);
 
-    const extractResponse = await extractRoutes(request, pathname);
+    const extractResponse = await extractRoutesFor(env)(request, pathname);
     if (extractResponse) return extractResponse;
 
     return jsonError('NOT_FOUND', 'Not found', 404);
