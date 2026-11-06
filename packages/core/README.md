@@ -141,3 +141,76 @@ key chain with the account API. It never stores or sends the password.
   `RATE_LIMITED` with `retryAfter`, `UNAUTHORIZED`...), `NETWORK_ERROR` or `BAD_RESPONSE`.
 - The wire contract is exported without any cryptography from `@stash/core/protocol`, which is
   what the Worker imports.
+
+## Sync
+
+`createSyncClient({ getToken, getDataKey, cache?, isOnline?, baseUrl?, fetch? })` from
+`@stash/core/sync` keeps the account's items, categories and tags in step with the server. It
+holds the decrypted copy in memory only; on disk there is the encrypted cache, and on the server
+only encrypted blobs with their id, kind and version.
+
+- `getToken` is `async () => (await accountClient.getSession())?.token ?? null`; `getDataKey` is
+  `() => dataKeyStore.load()`.
+- Each record is sealed with `encryptRecord(dataKey, id, plaintext)`: the blob is bound to its
+  random id, never derived from the content. The thumbnail travels inside the item's blob.
+- The cache (`createIndexedDbRecordCache({ indexedDB?, databaseName? })`) stores the blobs as the
+  server sent them, plus the offline queue and the pull cursor. Nothing readable reaches
+  IndexedDB. Pass `indexedDB` from `fake-indexeddb` in tests.
+- Wire it to the account: `createAccountClient({ ..., onLogout: () => sync.clear() })`. Logout
+  and account deletion then wipe memory, cache and queue.
+
+### Online with cache
+
+| Situation                         | Behaviour                                                                                       |
+| --------------------------------- | ----------------------------------------------------------------------------------------------- |
+| No connection, reading            | `open()` loads the cache; lists and search work as usual.                                       |
+| No connection, saving a new link  | It goes to the encrypted queue and shows with `queued: true`. `sync()` uploads it once.         |
+| No connection, any other change   | Fails with `SyncError` code `OFFLINE`; nothing is queued.                                       |
+| Two devices change the same thing | The server keeps the last write it receives; every device ends up with it on its next `sync()`. |
+
+`sync()` uploads the queue, then pulls every change after the cursor, page by page, deletions
+included. Calls overlap safely: a running sync or upload is shared, so a queued save is never sent
+twice, and retrying one whose answer was lost does not duplicate it (`create` is idempotent by
+id).
+
+### API
+
+| Method                                                   | What it does                                                                  |
+| -------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `open()` / `sync()`                                      | Load the cache (works offline) / upload the queue and pull changes.           |
+| `listItems()` / `getItem(id)`                            | Items newest first, with category and tags resolved, as `ItemView`.           |
+| `search({ query?, status?, source?, categoryId?, ... })` | Local search over title, URL, preview, tags and read content, plus filters.   |
+| `saveLink({ url, preview?, content?, tags?, ... })`      | Saves a link, pending and unclassified unless told otherwise; queued offline. |
+| `setReadResult(id, { preview, content, thumbnail? })`    | Stores what reading the link produced.                                        |
+| `classify(id, { categoryId?, priority?, tags? })`        | Sets category, priority (`high`, `medium`, `low` or `null`) and tags by name. |
+| `setStatus(id, status)`                                  | Marks `read`, `discarded` or `pending`; returns an undo.                      |
+| `deleteItem(id)`                                         | Deletes the item; returns an undo that brings it back.                        |
+| `listCategories()` / `createCategory(name)`              | Categories in order of importance, with item counts / adds one at the end.    |
+| `renameCategory(id, name)` / `deleteCategory(id)`        | Renames / deletes; its items stay, without category.                          |
+| `reorderCategories(ids)`                                 | New order: every category id once, most important first.                      |
+| `listTags()` / `renameTag(id, name)` / `deleteTag(id)`   | Tags by use; renaming onto an existing name merges both; deleting unlinks it. |
+| `pendingUploads()` / `subscribe(listener)` / `clear()`   | Queue size / change notifications / forget everything local.                  |
+
+- An item is still to classify while it lacks a priority or a category: `isUnclassified(item)`, or
+  `search({ unclassified: true })`. `categoryId: null` filters items without category.
+- Tag names match ignoring case; category and tag names are trimmed, with length limits.
+- Undo is another change: it needs the network too.
+- Failures are `SyncError` with `code`: `OFFLINE`, `LOCKED` (no session or data key),
+  `UNAUTHORIZED`, `NOT_FOUND`, `INVALID_INPUT`, `TOO_LARGE`, `QUOTA_EXCEEDED`, `RATE_LIMITED`
+  (with `retryAfter`), `CONFLICT`, `BAD_RESPONSE` or `SERVER_ERROR`.
+- An item too big for the server's blob limit is shrunk before saving: first the read content's
+  HTML goes, then its text is cut, and only then the thumbnail goes.
+- A record that does not decrypt is skipped; a cached one that no longer decrypts is dropped and
+  pulled again.
+
+### Records API
+
+The wire contract is exported without cryptography from `@stash/core/sync-protocol`.
+
+- `POST /api/records` with `{ operations: [...] }` (at most 100, 4 MB body): `create` stores a new
+  id and is a no-op on retry; `put` overwrites (last write wins, also undoes a delete); `delete`
+  leaves a tombstone. Answers `{ data: { results: [{ id, applied, version }] } }` in order.
+- `GET /api/records?cursor=<n>&limit=<n>` answers `{ data: WireRecord[], meta: { nextCursor,
+hasMore } }` in version order. Cursor `0` is the first load and leaves tombstones out.
+- Versions are assigned by the server, increasing per account. Limits: 1 MiB per blob, 5 000
+  records and 25 MiB per account. Both need a Bearer session and count in per-account rate limits.

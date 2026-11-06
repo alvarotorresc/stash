@@ -18,3 +18,8 @@ export function jsonError(
     { status, headers: { ...BASE_HEADERS, ...headers } },
   );
 }
+
+/** A page of a list: `{ data, meta }`, as in cursor pagination. */
+export function jsonPage<T, M>(data: T, meta: M): Response {
+  return Response.json({ data, meta }, { status: 200, headers: BASE_HEADERS });
+}

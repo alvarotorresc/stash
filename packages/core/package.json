@@ -7,7 +7,9 @@
   "exports": {
     ".": "./src/index.ts",
     "./extract": "./src/extract.ts",
-    "./protocol": "./src/account/protocol.ts"
+    "./protocol": "./src/account/protocol.ts",
+    "./sync-protocol": "./src/sync/protocol.ts",
+    "./sync": "./src/sync/index.ts"
   },
   "scripts": {
     "typecheck": "tsc",

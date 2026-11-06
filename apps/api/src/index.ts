@@ -6,6 +6,7 @@ import { sweepExpiredRows } from './accounts/sweep';
 import { createSessionResolver } from './auth/session';
 import { createExtractRoutes, DEFAULT_LIMITS } from './extract/routes';
 import { jsonData, jsonError } from './http';
+import { handleRecordsRequest, isRecordsPath } from './records/routes';
 
 /** Extraction routes bound to this request's bindings: real sessions and D1 rate limits. */
 function extractRoutesFor(env: AccountsEnv) {
@@ -46,6 +47,7 @@ export default {
     }
 
     if (isAccountsPath(pathname)) return handleAccountsRequest(request, env);
+    if (isRecordsPath(pathname)) return handleRecordsRequest(request, env);
 
     const extractResponse = await extractRoutesFor(env)(request, pathname);
     if (extractResponse) return extractResponse;
