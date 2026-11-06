@@ -1,6 +1,9 @@
 name = "stash-api"
 main = "src/index.ts"
 compatibility_date = "2026-11-03"
+# Every outbound fetch goes through the Cloudflare front door like any internet request. Without it,
+# requests to a zone of the same account reach the origin directly, skipping that zone's security.
+compatibility_flags = ["global_fetch_strictly_public"]
 # No Wrangler usage telemetry from this project.
 send_metrics = false
 
