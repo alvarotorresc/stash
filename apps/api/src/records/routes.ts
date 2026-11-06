@@ -109,8 +109,9 @@ function checkQuota(
 
 async function push(context: Context): Promise<Response> {
   const { request, db, pepper, accountId, now } = context;
-  await enforceRateLimit(db, pepper, 'records', { account: accountId }, now);
+  // The body is checked first: a refused body costs no write.
   const operations = await readPush(request);
+  await enforceRateLimit(db, pepper, 'records', { account: accountId }, now);
 
   const [existingResult, countsResult] = await db.batch([
     db

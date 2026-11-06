@@ -12,7 +12,7 @@ import {
   type RecordsErrorCode,
 } from '@stash/core/sync-protocol';
 import { jsonError } from '../http';
-import { readBounded } from '../extract/safe-fetch';
+import { readJsonBody } from '../accounts/validation';
 
 /** An error that is safe to show: it becomes the `{ error }` envelope as is. */
 export class RecordsError extends Error {
@@ -73,30 +73,13 @@ function parseOperation(value: unknown, index: number): ParsedOperation {
   return { op, id, kind, ...blobSize(blob, index) };
 }
 
-/** Reads and validates the body of `POST /api/records`, streaming and stopping at the limit. */
+/**
+ * Reads and validates the body of `POST /api/records`, streaming and stopping at the limit. The
+ * body goes through the same reader as the account routes, so it must be declared JSON.
+ */
 export async function readPush(request: Request): Promise<ParsedOperation[]> {
-  const contentType = request.headers.get('content-type') ?? '';
-  if (!/^application\/json\s*(;|$)/i.test(contentType)) {
-    throw new RecordsError('UNSUPPORTED_MEDIA_TYPE', 'The body must be JSON', 415);
-  }
-  let bytes: Uint8Array;
-  try {
-    ({ bytes } = await readBounded(
-      request,
-      MAX_PUSH_BODY_BYTES,
-      'reject',
-      new AbortController().signal,
-    ));
-  } catch {
-    throw new RecordsError('PAYLOAD_TOO_LARGE', 'Body too large', 413);
-  }
-  let body: unknown;
-  try {
-    body = JSON.parse(new TextDecoder().decode(bytes));
-  } catch {
-    throw invalid('Body must be JSON');
-  }
-  const operations = (body as { operations?: unknown } | null)?.operations;
+  const body = await readJsonBody(request, MAX_PUSH_BODY_BYTES);
+  const { operations } = body;
   if (!Array.isArray(operations) || operations.length === 0) {
     throw invalid('operations must be a non-empty array');
   }

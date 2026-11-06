@@ -549,6 +549,32 @@ describe('/api/records', () => {
       expect(await errorOf(response)).toEqual({ status: 415, code: 'UNSUPPORTED_MEDIA_TYPE' });
     });
 
+    it('should not count a refused body in the rate limit', async () => {
+      const { token } = await register();
+      const counters = () =>
+        env.DB.prepare(
+          'SELECT count(*) AS n, coalesce(sum(count), 0) AS hits FROM rate_limits',
+        ).first<{ n: number; hits: number }>();
+      const before = await counters();
+
+      const statuses = [
+        (
+          await call(RECORDS_PATH, {
+            method: 'POST',
+            token,
+            headers: { 'Content-Type': 'text/plain' },
+          })
+        ).status,
+        (await pushRaw(token, { operations: [] })).status,
+        (await pushRaw(token, { operations: [create('item', blob(MAX_BLOB_BYTES + 1))] })).status,
+      ];
+
+      expect({ statuses, counters: await counters() }).toEqual({
+        statuses: [415, 400, 413],
+        counters: before,
+      });
+    });
+
     it.each(['?cursor=-1', '?cursor=abc', '?cursor=01', '?limit=0', '?limit=x', '?since=3'])(
       'should reject the query %s with 400',
       async (query) => {
