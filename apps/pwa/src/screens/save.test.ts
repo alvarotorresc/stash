@@ -18,6 +18,32 @@ describe('Save sheet from the share target', () => {
     expect(saved?.source).toBe('reddit');
   });
 
+  it('should say a shared link was already saved and take to the existing item', async () => {
+    const url = 'https://lacocinaordenada.es/organizar-la-despensa';
+    const { app } = await renderApp(shareAt(url));
+    const before = app.items.length;
+
+    const sheet = await screen.findByRole('dialog', { name: /Ya estaba guardado:/ });
+    expect(within(sheet).getByText('Ya estaba guardado')).toBeTruthy();
+    expect(
+      within(sheet).getByText('Lo guardaste antes. Puedes abrirlo o clasificarlo.'),
+    ).toBeTruthy();
+    expect(within(sheet).getByRole('group', { name: 'Prioridad' })).toBeTruthy();
+    expect(app.items).toHaveLength(before);
+
+    await fireEvent.click(within(sheet).getByRole('button', { name: 'Abrir' }));
+
+    await waitFor(() => expect(app.sheet).toBeNull());
+    expect(app.router.route).toEqual({ name: 'item', id: 'item-despensa' });
+  });
+
+  it('should not show the already-saved notice for a new link', async () => {
+    await renderApp(shareAt('https://example.com/nuevo'));
+
+    await screen.findByRole('dialog', { name: /Guardado:/ });
+    expect(screen.queryByText('Ya estaba guardado')).toBeNull();
+  });
+
   it('should leave it unsorted when closed without touching anything', async () => {
     const { app } = await renderApp(shareAt('https://example.com/articulo'));
     const sheet = await screen.findByRole('dialog', { name: /Guardado:/ });

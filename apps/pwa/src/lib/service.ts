@@ -56,6 +56,9 @@ export type ItemContent =
   /** Queued: nothing downloaded yet. */
   | { kind: 'none' };
 
+/** What saving a link ends in: `alreadySaved` when it was already in Stash and nothing was created. */
+export type SavedItem = Item & { alreadySaved: boolean };
+
 export interface ItemDetail extends Item {
   content: ItemContent;
 }
@@ -149,8 +152,11 @@ export interface StashService {
   // Items.
   listItems(): Promise<Item[]>;
   getItem(id: string): Promise<ItemDetail | null>;
-  /** Saves a link; offline it waits in the queue (queued: true). */
-  save(url: string): Promise<Item>;
+  /**
+   * Saves a link; offline it waits in the queue (queued: true). A link already saved creates
+   * nothing: the existing item comes back with `alreadySaved: true`.
+   */
+  save(url: string): Promise<SavedItem>;
   classify(id: string, change: Classification): Promise<void>;
   /** Marks read, discarded or pending. Returns the undo, which restores the previous status. */
   setStatus(id: string, status: Status): Promise<Undo>;

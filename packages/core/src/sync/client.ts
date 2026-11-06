@@ -38,6 +38,7 @@ import {
 } from './protocol';
 import { searchItems, type ItemFilters, type ItemView, type SearchResult } from './search';
 import { createTransport, type Transport, type TransportOptions } from './transport';
+import { urlKey } from './url-key';
 
 export interface SyncClientOptions extends TransportOptions {
   /** The session's bearer token, or null when logged out (`accountClient.getSession()`). */
@@ -67,6 +68,9 @@ export interface SaveLinkInput {
   /** Tag names; existing tags are reused ignoring case, new ones are created. */
   readonly tags?: readonly string[];
 }
+
+/** The item a save ended in; `alreadySaved` when that link was already in Stash and nothing was created. */
+export type SavedLink = ItemView & { readonly alreadySaved: boolean };
 
 export interface Classification {
   readonly categoryId?: string | null;
@@ -117,8 +121,12 @@ export interface SyncClient {
   /**
    * Saves a link. Offline, or if the upload fails for lack of connection or a passing server
    * failure, it is queued: a save is never lost.
+   *
+   * A link that is already saved (also waiting in the queue, and whatever its status) creates
+   * nothing: the existing item comes back with `alreadySaved: true`. Links are compared by
+   * `urlKey`; a deleted item no longer counts.
    */
-  saveLink(input: SaveLinkInput): Promise<ItemView>;
+  saveLink(input: SaveLinkInput): Promise<SavedLink>;
   /** Stores what reading the link produced (preview, content, thumbnail). */
   setReadResult(id: string, result: ReadResult): Promise<void>;
   classify(id: string, change: Classification): Promise<void>;
@@ -628,6 +636,12 @@ export function createSyncClient(options: SyncClientOptions): SyncClient {
     async saveLink(input) {
       await open();
       const url = httpUrl(input.url);
+      const key = urlKey(url);
+      for (const { record, queued } of entries.values()) {
+        if (record.kind === 'item' && urlKey(record.value.url) === key) {
+          return { ...view(record.value, queued), alreadySaved: true };
+        }
+      }
       const at = now();
       const { ids, created } = resolveTags(input.tags ?? [], at);
       if (input.priority != null && !isPriority(input.priority)) {
@@ -662,7 +676,7 @@ export function createSyncClient(options: SyncClientOptions): SyncClient {
         }
       }
       if (queued) await enqueue(records);
-      return view(item, queued);
+      return { ...view(item, queued), alreadySaved: false };
     },
 
     async setReadResult(id, result) {

@@ -285,7 +285,7 @@ export function createMockService(options: MockOptions = {}): StashService {
       await wait();
       const url = new URL(rawUrl);
       const existing = items.find((item) => item.url === url.href);
-      if (existing) return summary(existing);
+      if (existing) return { ...summary(existing), alreadySaved: true };
       const source = sourceOf(url);
       const display = `${url.hostname.replace(/^www\./, '')}${url.pathname}`.replace(/\/$/, '');
       const item: ItemDetail = {
@@ -307,7 +307,7 @@ export function createMockService(options: MockOptions = {}): StashService {
       };
       items = [item, ...items];
       notify();
-      return summary(item);
+      return { ...summary(item), alreadySaved: false };
     },
 
     async classify(id, change: Classification) {

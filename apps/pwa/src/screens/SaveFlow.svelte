@@ -1,13 +1,14 @@
 <script lang="ts">
   import { SaveSheet, type Priority } from '@stash/ui';
   import { useApp } from '../lib/app.svelte';
+  import type { SheetState } from '../lib/app.svelte';
   import type { Classification } from '../lib/service';
 
   const app = useApp();
 
   let tagQuery = $state('');
   // Keeps the last item while the sheet slides out.
-  let last = $state<{ variant: 'saved' | 'queued' | 'classify'; itemId: string } | null>(null);
+  let last = $state<SheetState | null>(null);
 
   $effect(() => {
     if (app.sheet) {
@@ -25,6 +26,13 @@
     if (id) void app.change(() => app.service.classify(id, classification));
   }
 
+  function open() {
+    const id = item?.id;
+    if (!id) return;
+    app.closeSheet();
+    app.router.go({ name: 'item', id });
+  }
+
   function createCategory(name: string) {
     const id = item?.id;
     if (!id) return;
@@ -39,6 +47,7 @@
   <SaveSheet
     open={app.sheet !== null}
     variant={last.variant}
+    duplicate={last.duplicate}
     title={item.title}
     thumbnail={item.thumbnail}
     priority={item.priority}
@@ -52,6 +61,7 @@
     oncreatecategory={createCategory}
     ontagadd={(name) => change({ tags: [...item.tags, name] })}
     ontagremove={(name) => change({ tags: item.tags.filter((tag) => tag !== name) })}
+    onopen={open}
     ondone={() => app.closeSheet()}
     onclose={() => app.closeSheet()}
   />

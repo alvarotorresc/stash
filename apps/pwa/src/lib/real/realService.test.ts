@@ -182,6 +182,22 @@ describe('createRealService', () => {
   });
 
   describe('items', () => {
+    it('should tell when a saved link was already in the drawer, without a second item', async () => {
+      const { backend, service, stash } = await signedUp();
+      backend.pages.set(URL_A, webPage(URL_A, 'La despensa', ['Garbanzos y lentejas.']));
+      const first = await service.save(URL_A);
+      await stash.idle();
+
+      const again = await service.save(`${URL_A}?utm_source=chat`);
+
+      expect({
+        firstMark: first.alreadySaved,
+        id: again.id,
+        alreadySaved: again.alreadySaved,
+        listed: (await service.listItems()).length,
+      }).toEqual({ firstMark: false, id: first.id, alreadySaved: true, listed: 1 });
+    });
+
     it('should save at once and show the page once read', async () => {
       const { backend, service, stash } = await signedUp();
       backend.pages.set(URL_A, webPage(URL_A, 'La despensa', ['Garbanzos y lentejas.']));

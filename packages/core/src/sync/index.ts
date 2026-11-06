@@ -4,6 +4,7 @@ export type {
   Classification,
   ReadResult,
   SaveLinkInput,
+  SavedLink,
   SyncClient,
   SyncClientOptions,
   SyncSummary,

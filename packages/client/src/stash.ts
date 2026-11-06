@@ -12,8 +12,8 @@ import {
   SyncError,
   createIndexedDbRecordCache,
   createSyncClient,
-  type ItemView,
   type RecordCache,
+  type SavedLink,
   type SyncClient,
 } from '@stash/core/sync';
 import { ExtractError, createExtractor, type Extractor } from './extract';
@@ -80,9 +80,11 @@ export interface Stash {
   refresh(): Promise<void>;
   /**
    * Saves a link at once (queued without connection or when the server fails) and reads it in
-   * the background: the save never waits for the page and is never lost because of it.
+   * the background: the save never waits for the page and is never lost because of it. A link
+   * already saved creates nothing and is not read again: the existing item comes back with
+   * `alreadySaved: true`.
    */
-  save(url: string): Promise<ItemView>;
+  save(url: string): Promise<SavedLink>;
   /**
    * Runs a change through the sync client, one at a time: each change starts from the copy the
    * previous one left, so a background read and a classification never overwrite each other.
@@ -352,7 +354,7 @@ export function createStash(options: StashOptions = {}): Stash {
     async save(url) {
       await open();
       const item = await guard(() => sync.saveLink({ url }));
-      if (!item.queued) void track(readItem(item.id));
+      if (!item.queued && !item.alreadySaved) void track(readItem(item.id));
       return item;
     },
 
