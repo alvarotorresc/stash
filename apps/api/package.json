@@ -16,6 +16,7 @@
   "devDependencies": {
     "@cloudflare/vitest-plugin": "1.5.1",
     "@cloudflare/workers-types": "5.20261103.1",
+    "@stash/client": "workspace:*",
     "@stash/pwa": "workspace:*",
     "@vitest/coverage-v8": "5.1.0",
     "fake-indexeddb": "6.2.7",

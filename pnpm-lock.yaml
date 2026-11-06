@@ -215,6 +215,9 @@ importers:
       '@cloudflare/workers-types':
         specifier: 5.20261103.1
         version: 5.20261103.1
+      '@stash/client':
+        specifier: workspace:*
+        version: link:../../packages/client
       '@stash/pwa':
         specifier: workspace:*
         version: link:../pwa
