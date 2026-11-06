@@ -252,6 +252,34 @@ describe('SaveSheet', () => {
     expect(ondone).toHaveBeenCalledOnce();
   });
 
+  it('should say the link was already saved and offer to open or classify it', async () => {
+    const onopen = vi.fn();
+    const ondone = vi.fn();
+    render(SaveSheet, { ...base, variant: 'saved', duplicate: true, onopen, ondone });
+
+    expect(
+      screen.getByRole('dialog', { name: 'Ya estaba guardado: Crema de calabaza asada' }),
+    ).toBeTruthy();
+    expect(screen.getByText('Lo guardaste antes. Puedes abrirlo o clasificarlo.')).toBeTruthy();
+    expect(screen.queryByText(/Si cierras sin tocar nada/)).toBeNull();
+    expect(screen.getByRole('group', { name: 'Prioridad' })).toBeTruthy();
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Abrir' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Listo' }));
+
+    expect(onopen).toHaveBeenCalledOnce();
+    expect(ondone).toHaveBeenCalledOnce();
+  });
+
+  it('should say the link was already waiting offline', () => {
+    render(SaveSheet, { ...base, variant: 'queued', duplicate: true });
+
+    expect(
+      screen.getByRole('dialog', { name: 'Ya estaba en cola: Crema de calabaza asada' }),
+    ).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Abrir' })).toBeNull();
+  });
+
   it('should classify an existing item without the save confirmation', () => {
     render(SaveSheet, { ...base, variant: 'classify', priority: 'low' });
 

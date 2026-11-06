@@ -18,6 +18,8 @@
      * (from the reading view or the Clasificar button).
      */
     variant: 'saved' | 'queued' | 'classify';
+    /** The link was already in Stash: nothing was created, and it can be opened. */
+    duplicate?: boolean;
     title: string;
     thumbnail?: { src?: string; tone?: Tone; icon?: IconName };
     priority?: Priority | null;
@@ -34,6 +36,8 @@
     ontagremove?: (name: string) => void;
     /** Listo or Vale. */
     ondone: () => void;
+    /** Opens the existing item; only offered when `duplicate` and not waiting offline. */
+    onopen?: () => void;
     /** Swipe down, Escape or scrim. Changes are kept either way. */
     onclose: () => void;
   }
@@ -41,6 +45,7 @@
   let {
     open,
     variant,
+    duplicate = false,
     title,
     thumbnail,
     priority = null,
@@ -56,11 +61,17 @@
     ontagadd = () => {},
     ontagremove = () => {},
     ondone,
+    onopen,
     onclose,
   }: Props = $props();
 
   const queued = $derived(variant === 'queued');
-  const status = $derived(queued ? 'En cola' : variant === 'saved' ? 'Guardado' : null);
+  const status = $derived.by(() => {
+    if (variant === 'classify') return null;
+    if (duplicate) return queued ? 'Ya estaba en cola' : 'Ya estaba guardado';
+    return queued ? 'En cola' : 'Guardado';
+  });
+  const showOpen = $derived(duplicate && !queued && onopen !== undefined);
 </script>
 
 <BottomSheet {open} {onclose} label={status ? `${status}: ${title}` : `Clasificar: ${title}`}>
@@ -91,7 +102,11 @@
     <div class="done"><Button variant="primary" block onclick={ondone}>Vale</Button></div>
   {:else}
     {#if variant === 'saved'}
-      <p class="hint">Ya está en Stash. Si quieres, clasifícalo ahora.</p>
+      <p class="hint">
+        {duplicate
+          ? 'Lo guardaste antes. Puedes abrirlo o clasificarlo.'
+          : 'Ya está en Stash. Si quieres, clasifícalo ahora.'}
+      </p>
     {/if}
     <div class="controls">
       <PrioritySegment value={priority} onchange={onpriority} />
@@ -110,8 +125,15 @@
         onremove={ontagremove}
       />
     </div>
-    <div class="done"><Button variant="primary" block onclick={ondone}>Listo</Button></div>
-    {#if variant === 'saved'}
+    <div class="done">
+      {#if showOpen}
+        <Button variant="primary" block onclick={onopen}>Abrir</Button>
+        <Button block onclick={ondone}>Listo</Button>
+      {:else}
+        <Button variant="primary" block onclick={ondone}>Listo</Button>
+      {/if}
+    </div>
+    {#if variant === 'saved' && !duplicate}
       <p class="small">Si cierras sin tocar nada, se queda en Sin clasificar.</p>
     {/if}
   {/if}
@@ -164,6 +186,7 @@
   }
   .done {
     display: flex;
+    gap: 8px;
     margin-top: 18px;
   }
   .small {
