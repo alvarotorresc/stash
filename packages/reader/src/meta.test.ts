@@ -1,0 +1,48 @@
+import { describe, expect, it } from 'vitest';
+import { cleanText, extractMeta, toIsoDate } from './meta';
+
+describe('cleanText', () => {
+  it('should collapse whitespace and cap the length', () => {
+    expect(cleanText(`  a\n  b  ${'c'.repeat(20)}`, 10)).toBe('a b ccccc…');
+  });
+
+  it.each([null, undefined, '', '   '])('should return null for %j', (value) => {
+    expect(cleanText(value)).toBeNull();
+  });
+});
+
+describe('toIsoDate', () => {
+  it.each([
+    ['2025-03-04', '2025-03-04'],
+    ['2025-03-04T10:00:00+02:00', '2025-03-04T08:00:00.000Z'],
+    ['not a date', null],
+    [null, null],
+  ])('should normalize %j to %j', (value, expected) => {
+    expect(toIsoDate(value)).toBe(expected);
+  });
+});
+
+describe('cleanText with spoofing characters', () => {
+  it('should remove bidi overrides and control characters', () => {
+    expect(cleanText('invoice‮fdp.exe\u0007')).toBe('invoicefdp.exe');
+  });
+
+  it('should not split a surrogate pair when capping', () => {
+    const out = cleanText(`abc${'😀'.repeat(10)}`, 5) ?? '';
+    expect(() => encodeURIComponent(out)).not.toThrow();
+  });
+});
+
+describe('extractMeta image', () => {
+  it.each([
+    'http://169.254.169.254/latest/meta-data/',
+    'http://127.0.0.1:8080/a.png',
+    'http://localhost/a.png',
+  ])('should drop the internal-network image %s', (image) => {
+    const doc = new DOMParser().parseFromString(
+      `<meta property="og:image" content="${image}">`,
+      'text/html',
+    );
+    expect(extractMeta(doc, 'https://blog.example.com/a').imageUrl).toBeNull();
+  });
+});
