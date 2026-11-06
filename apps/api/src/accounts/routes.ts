@@ -3,7 +3,7 @@ import { jsonData, jsonError } from '../http';
 import { readPepper, type AccountsEnv } from './env';
 import { ApiError, unauthorized, validationError } from './errors';
 import { NO_MATCH_DIGEST, digestsMatch, fakeSalt, hashKey } from './hashing';
-import { clientIp, enforceRateLimit } from './rate-limit';
+import { accountCounterKeys, clientIp, enforceRateLimit } from './rate-limit';
 import { newSession, resolveSessionFromRequest, type Session } from './sessions';
 import {
   DELETE_ACCOUNT_STATEMENTS,
@@ -330,7 +330,11 @@ async function deleteAccount(context: Context): Promise<Response> {
 
   const user = await requireUser(context, session);
   await proveLoginKey(context, user, loginKey);
-  await db.batch(DELETE_ACCOUNT_STATEMENTS.map((sql) => db.prepare(sql).bind(user.id)));
+  const counters = await accountCounterKeys(pepper, user.id);
+  await db.batch([
+    ...DELETE_ACCOUNT_STATEMENTS.map((sql) => db.prepare(sql).bind(user.id)),
+    ...counters.map((key) => db.prepare('DELETE FROM rate_limits WHERE key = ?').bind(key)),
+  ]);
   return jsonData({ ok: true });
 }
 

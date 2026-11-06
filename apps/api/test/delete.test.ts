@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { API_PATHS } from '@stash/core/protocol';
 import { describe, expect, it } from 'vitest';
+import { accountCounterKeys } from '../src/accounts/rate-limit';
 import { call, dataOf, errorOf, login, randomKey, register } from './helpers';
 
 function deleteAccount(token: string | undefined, loginKey: string): Promise<Response> {
@@ -42,6 +43,21 @@ describe('DELETE /api/account', () => {
       other: 401,
       login: 401,
     });
+  });
+
+  it('should delete the rate limit counters tied to the account', async () => {
+    const { keys, token } = await register();
+    const userId = (await env.DB.prepare('SELECT id FROM users').first<{ id: string }>())?.id;
+    const counters = await accountCounterKeys(env.PEPPER, userId as string);
+
+    await dataOf(await deleteAccount(token, keys.loginKey));
+    const left = await env.DB.prepare(
+      `SELECT count(*) AS n FROM rate_limits WHERE key IN (${counters.map(() => '?').join(', ')})`,
+    )
+      .bind(...counters)
+      .first<{ n: number }>();
+
+    expect({ tracked: counters.length, left: left?.n }).toEqual({ tracked: 2, left: 0 });
   });
 
   it('should free the email for a new registration', async () => {

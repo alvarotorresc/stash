@@ -81,8 +81,7 @@ export async function countRequest(
   for (const [bucket, limit] of Object.entries(limits) as [Bucket, Limit][]) {
     const subject = bucket === 'global' ? '' : subjects[bucket];
     if (subject === undefined) continue;
-    const digest = await hmac(pepper, 'rate-limit', `${action}\u0000${bucket}\u0000${subject}`);
-    buckets.push({ limit, key: toBase64Url(digest) });
+    buckets.push({ limit, key: await counterKey(pepper, action, bucket, subject) });
   }
 
   const results = await db.batch<{ count: number; window_start: number }>(
@@ -114,6 +113,16 @@ export async function enforceRateLimit(
       'Retry-After': String(Math.ceil(retryAfterMs / 1000)),
     });
   }
+}
+
+function counterKey(pepper: string, action: Action, bucket: Bucket, subject: string) {
+  return hmac(pepper, 'rate-limit', `${action}\u0000${bucket}\u0000${subject}`).then(toBase64Url);
+}
+
+/** Keys of every counter tied to an account id, so deleting the account can remove them. */
+export async function accountCounterKeys(pepper: string, accountId: string): Promise<string[]> {
+  const actions = (Object.keys(LIMITS) as Action[]).filter((action) => 'account' in LIMITS[action]);
+  return Promise.all(actions.map((action) => counterKey(pepper, action, 'account', accountId)));
 }
 
 /** The extraction limits as a `RateLimiter`, keyed by account id, counted in D1. */
