@@ -60,7 +60,11 @@ export interface AccountClient {
     recoveryCode: string;
     newPassword: string;
   }): Promise<{ recoveryCode: string; dataKey: DataKey }>;
-  /** Deletes the account after proving the password, then forgets everything local. */
+  /**
+   * Deletes the account after proving the password, then forgets everything local. It also
+   * forgets everything when the server answers that there is no session (the account may be
+   * gone already), and still throws `UNAUTHORIZED` so the app can say so.
+   */
   deleteAccount(input: { password: string }): Promise<void>;
   /** The current session, or null when there is none or it has expired. */
   getSession(): Promise<StoredSession | null>;
@@ -158,8 +162,9 @@ export function createAccountClient(options: AccountClientOptions): AccountClien
     },
 
     async logout() {
-      const session = await sessionStore.load();
       try {
+        // Inside the try: a storage that cannot be read must not keep the local data alive.
+        const session = await sessionStore.load();
         if (session !== null) {
           await api<OkResponse>({ method: 'POST', path: API_PATHS.logout, token: session.token });
         }
@@ -219,20 +224,28 @@ export function createAccountClient(options: AccountClientOptions): AccountClien
     },
 
     async deleteAccount({ password }) {
-      const token = await requireToken();
-      const account = await getAccount(token);
-      const { loginKey } = await derivePasswordCredentials({
-        email: account.email,
-        password,
-        salt: account.salt,
-        kdf: account.kdf,
-      });
-      await api<OkResponse>({
-        method: 'DELETE',
-        path: API_PATHS.account,
-        token,
-        body: { loginKey },
-      });
+      try {
+        const token = await requireToken();
+        const account = await getAccount(token);
+        const { loginKey } = await derivePasswordCredentials({
+          email: account.email,
+          password,
+          salt: account.salt,
+          kdf: account.kdf,
+        });
+        await api<OkResponse>({
+          method: 'DELETE',
+          path: API_PATHS.account,
+          token,
+          body: { loginKey },
+        });
+      } catch (error) {
+        // No session: the account may already be gone (a deletion whose answer was lost, then
+        // retried) or the session expired. Either way the user asked to leave, so nothing local
+        // is kept. A wrong password (INVALID_CREDENTIALS) keeps everything.
+        if (error instanceof AccountApiError && error.code === 'UNAUTHORIZED') await forgetLocal();
+        throw error;
+      }
       await forgetLocal();
     },
 

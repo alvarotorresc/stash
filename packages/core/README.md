@@ -118,7 +118,7 @@ key chain with the account API. It never stores or sends the password.
 | `logout()`                                         | Closes the session on the server when it can, then always clears the data key, session and cache. |
 | `changePassword({ currentPassword, newPassword })` | Proves the current password to get the wrapped data key, re-wraps it; other sessions are closed.  |
 | `recover({ email, recoveryCode, newPassword })`    | Sets a new password and recovery code; the server closes every session.                           |
-| `deleteAccount({ password })`                      | Proves the password, deletes the account and clears everything local.                             |
+| `deleteAccount({ password })`                      | Proves the password, deletes the account and clears everything local, also on `UNAUTHORIZED`.     |
 | `getSession()`                                     | The stored session, or `null` when there is none or it expired.                                   |
 
 - Every password entry saves the data key with `afterPasswordEntry: true`.

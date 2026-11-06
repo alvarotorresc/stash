@@ -143,6 +143,18 @@ describe('createAccountClient', () => {
       });
     });
 
+    it('should still forget everything locally when the session cannot be read', async () => {
+      const { keys, sessionStore, client, onLogout } = await registered();
+      sessionStore.load = () => Promise.reject(new Error('storage blocked'));
+
+      await client.logout().catch(() => undefined);
+
+      expect({ key: keys.state.key, cache: onLogout.mock.calls.length }).toEqual({
+        key: null,
+        cache: 1,
+      });
+    });
+
     it('should run every local step and report the first failure', async () => {
       const { keys, client, onLogout } = await registered();
       keys.store.clear = () => Promise.reject(new Error('disk full'));
@@ -287,6 +299,34 @@ describe('createAccountClient', () => {
         session: await client.getSession(),
         cache: onLogout.mock.calls.length,
       }).toEqual({ users: 0, key: null, session: null, cache: 1 });
+    });
+
+    it('should forget everything local when the account is already gone on the server', async () => {
+      // A deletion that went through but whose answer was lost: the retry finds no session.
+      const { client, server, keys, onLogout } = await registered();
+      server.users.clear();
+      server.sessions.clear();
+
+      const error = await client.deleteAccount({ password: PASSWORD }).catch((e) => e);
+
+      expect({
+        code: (error as AccountApiError).code,
+        key: keys.state.key,
+        session: await client.getSession(),
+        cache: onLogout.mock.calls.length,
+      }).toEqual({ code: 'UNAUTHORIZED', key: null, session: null, cache: 1 });
+    });
+
+    it('should keep everything when the answer to the deletion is lost', async () => {
+      const { client, server, keys } = await registered();
+      server.failures.set(API_PATHS.account, { status: 503, code: 'INTERNAL_ERROR' });
+
+      await client.deleteAccount({ password: PASSWORD }).catch(() => undefined);
+
+      expect({
+        key: keys.state.key !== null,
+        session: (await client.getSession()) !== null,
+      }).toEqual({ key: true, session: true });
     });
 
     it('should keep everything when the password is wrong', async () => {
