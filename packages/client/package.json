@@ -1,0 +1,26 @@
+{
+  "name": "@stash/client",
+  "version": "0.0.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/test/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc",
+    "test": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@stash/core": "workspace:*",
+    "@stash/reader": "workspace:*"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "5.1.0",
+    "fake-indexeddb": "6.2.7",
+    "jsdom": "30.1.3",
+    "typescript": "6.0.3",
+    "vitest": "5.1.0"
+  }
+}
