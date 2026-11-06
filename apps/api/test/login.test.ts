@@ -5,8 +5,36 @@ import {
   type LoginResponse,
   type PreloginResponse,
 } from '@stash/core/protocol';
+import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
-import { call, dataOf, errorOf, randomKey, register, uniqueEmail } from './helpers';
+import { handleAccountsRequest } from '../src/accounts/routes';
+import { BASE_URL, call, dataOf, errorOf, randomKey, register, uniqueEmail } from './helpers';
+
+/**
+ * A database where the batch that stores a new session first runs `meanwhile`, as if another
+ * request had committed between the login's read of the account and its insert.
+ */
+function racingDb(meanwhile: () => Promise<unknown>): D1Database {
+  let storesSession = false;
+  return new Proxy(env.DB, {
+    get(target, property) {
+      if (property === 'prepare') {
+        return (sql: string) => {
+          if (sql.includes('INSERT INTO sessions')) storesSession = true;
+          return target.prepare(sql);
+        };
+      }
+      if (property === 'batch') {
+        return async (statements: D1PreparedStatement[]) => {
+          if (storesSession) await meanwhile();
+          return target.batch(statements);
+        };
+      }
+      const value: unknown = Reflect.get(target, property, target);
+      return typeof value === 'function' ? (value as () => unknown).bind(target) : value;
+    },
+  });
+}
 
 function prelogin(email: string): Promise<Response> {
   return call(API_PATHS.prelogin, { body: { email } });
@@ -81,6 +109,28 @@ describe('POST /api/auth/login', () => {
       wrapped: keys.wrappedDataKey,
       me: 200,
     });
+  });
+
+  it('should open no session when the password changes while the login is checked', async () => {
+    const { email, keys } = await register();
+    const db = racingDb(() =>
+      env.DB.prepare("UPDATE users SET login_key_hash = 'changed meanwhile'").run(),
+    );
+    const before = await env.DB.prepare('SELECT count(*) AS n FROM sessions').first('n');
+
+    const res = await handleAccountsRequest(
+      new Request(`${BASE_URL}${API_PATHS.login}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, loginKey: keys.loginKey }),
+      }),
+      { DB: db, PEPPER: env.PEPPER },
+    );
+
+    expect({
+      error: await errorOf(res),
+      sessions: await env.DB.prepare('SELECT count(*) AS n FROM sessions').first('n'),
+    }).toEqual({ error: { status: 401, code: 'INVALID_CREDENTIALS' }, sessions: before });
   });
 
   it('should open a different session on every login', async () => {

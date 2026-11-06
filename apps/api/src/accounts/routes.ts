@@ -139,8 +139,14 @@ async function login(context: Context): Promise<Response> {
     await recordFailure(db, pepper, 'login', subjects, now);
     throw invalidCredentials('Wrong email or password', 401);
   }
-  const session = await newSession(db, pepper, user.id, now);
-  await db.batch(session.statements);
+  // Only stored if the login key is still the one checked: a password change or recovery that
+  // commits meanwhile closes every session, and this one must not slip in after it.
+  const session = await newSession(db, pepper, user.id, now, {
+    sql: 'EXISTS (SELECT 1 FROM users WHERE id = ? AND login_key_hash = ?)',
+    params: [user.id, user.login_key_hash],
+  });
+  const [stored] = await db.batch(session.statements);
+  if (stored?.meta.changes !== 1) throw invalidCredentials('Wrong email or password', 401);
   return jsonData({ session: session.grant, wrappedDataKey: user.wrapped_data_key });
 }
 
