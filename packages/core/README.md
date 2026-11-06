@@ -167,12 +167,25 @@ only encrypted blobs with their id, kind and version.
 | No connection, saving a new link  | It goes to the encrypted queue and shows with `queued: true`. `sync()` uploads it once.         |
 | Server failing, saving a new link | Queued as well on a 5xx, a rate limit, a bad answer or a closed session: a save is never lost.  |
 | No connection, any other change   | Fails with `SyncError` code `OFFLINE`; nothing is queued.                                       |
+| Saving a link already saved       | Nothing is created: the existing item returns with `alreadySaved: true`.                        |
 | Two devices change the same thing | The server keeps the last write it receives; every device ends up with it on its next `sync()`. |
 
 `sync()` uploads the queue, then pulls every change after the cursor, page by page, deletions
 included. Calls overlap safely: a running sync or upload is shared, so a queued save is never sent
 twice, and retrying one whose answer was lost does not duplicate it (`create` is idempotent by
 id).
+
+### Links already saved
+
+`saveLink` looks for the link among the decrypted items (cache and offline queue included) before
+creating anything. Links are compared by a key, not by their text: scheme and host in lowercase,
+no `#fragment`, no tracking parameters (`utm_*`, `fbclid`, `gclid`, `igsh`, `igshid`, and `si` on
+YouTube and Spotify), no trailing slash in the path (except the root) and no default port. The
+saved URL is never rewritten; only the comparison uses the key. An item that is pending, read or
+discarded counts as saved; a deleted one does not, so saving it again creates a new item.
+
+Known limit: the check runs on this device's copy. Two devices that save the same URL while
+offline at the same time each create an item, and both survive the next `sync()`.
 
 ### API
 

@@ -179,6 +179,104 @@ describe('createSyncClient', () => {
     });
   });
 
+  describe('saving a link that is already saved', () => {
+    it('should return the existing item without creating another', async () => {
+      const { client, server } = await setUp();
+      const first = await client.saveLink({ url: URL_A });
+
+      const again = await client.saveLink({ url: URL_A });
+
+      expect({
+        id: again.id,
+        alreadySaved: again.alreadySaved,
+        firstMark: first.alreadySaved,
+        listed: client.listItems().length,
+        pushes: server.pushes.length,
+      }).toEqual({ id: first.id, alreadySaved: true, firstMark: false, listed: 1, pushes: 1 });
+    });
+
+    it('should match a link written differently, and keep the saved URL as it was', async () => {
+      const { client } = await setUp();
+      const first = await client.saveLink({ url: 'https://Example.com/a/?utm_source=x#top' });
+
+      const again = await client.saveLink({ url: 'https://example.com/a' });
+
+      expect({ id: again.id, alreadySaved: again.alreadySaved, url: again.url }).toEqual({
+        id: first.id,
+        alreadySaved: true,
+        url: 'https://example.com/a/?utm_source=x#top',
+      });
+    });
+
+    it('should save a different link as new', async () => {
+      const { client } = await setUp();
+      await client.saveLink({ url: URL_A });
+
+      const other = await client.saveLink({ url: `${URL_A}-2` });
+
+      expect({ alreadySaved: other.alreadySaved, listed: client.listItems().length }).toEqual({
+        alreadySaved: false,
+        listed: 2,
+      });
+    });
+
+    it('should find the item in the queue when saved offline', async () => {
+      const { client, network } = await setUp();
+      network.online = false;
+      const first = await client.saveLink({ url: URL_A });
+
+      const again = await client.saveLink({ url: URL_A });
+
+      expect({
+        id: again.id,
+        alreadySaved: again.alreadySaved,
+        queued: again.queued,
+        pending: client.pendingUploads(),
+      }).toEqual({ id: first.id, alreadySaved: true, queued: true, pending: 1 });
+    });
+
+    it('should find the item in the cache after reopening the app', async () => {
+      const first = await setUp();
+      const saved = await first.client.saveLink({ url: URL_A });
+      const second = await setUp({ server: first.server, key: first.key, factory: first.factory });
+
+      const again = await second.client.saveLink({ url: URL_A });
+
+      expect({ id: again.id, alreadySaved: again.alreadySaved }).toEqual({
+        id: saved.id,
+        alreadySaved: true,
+      });
+    });
+
+    it.each(['read', 'discarded'] as const)('should count a %s item as saved', async (status) => {
+      const { client } = await setUp();
+      const first = await client.saveLink({ url: URL_A });
+      await client.setStatus(first.id, status);
+
+      const again = await client.saveLink({ url: URL_A });
+
+      expect({ id: again.id, alreadySaved: again.alreadySaved, status: again.status }).toEqual({
+        id: first.id,
+        alreadySaved: true,
+        status,
+      });
+    });
+
+    it('should create a new item when the earlier one was deleted', async () => {
+      const { client } = await setUp();
+      const first = await client.saveLink({ url: URL_A });
+      await client.deleteItem(first.id);
+
+      const again = await client.saveLink({ url: URL_A });
+
+      expect({
+        sameId: again.id === first.id,
+        alreadySaved: again.alreadySaved,
+        listed: client.listItems().length,
+      }).toEqual({ sameId: false, alreadySaved: false, listed: 1 });
+    });
+  });
+
   describe('offline queue', () => {
     it('should queue a save without connection and show it as queued', async () => {
       const { client, server, network } = await setUp();
