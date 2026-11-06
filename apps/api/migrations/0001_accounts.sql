@@ -29,11 +29,11 @@ CREATE INDEX sessions_user_id ON sessions (user_id);
 CREATE INDEX sessions_expires_at ON sessions (expires_at);
 
 -- Fixed-window counters. `key` is an HMAC of the bucket and its subject (IP, email or account),
--- so neither emails nor IP addresses are stored in clear.
+-- so neither emails nor IP addresses are stored in clear. Without a rowid or a secondary index,
+-- counting a request writes exactly one row, which is what the D1 write quota counts. The daily
+-- sweep scans the whole table instead, which costs reads only.
 CREATE TABLE rate_limits (
   key TEXT PRIMARY KEY,
   window_start INTEGER NOT NULL,
   count INTEGER NOT NULL
-) STRICT;
-
-CREATE INDEX rate_limits_window_start ON rate_limits (window_start);
+) STRICT, WITHOUT ROWID;

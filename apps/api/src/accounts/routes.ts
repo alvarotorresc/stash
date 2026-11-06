@@ -3,7 +3,7 @@ import { jsonData, jsonError } from '../http';
 import { readPepper, type AccountsEnv } from './env';
 import { ApiError, unauthorized, validationError } from './errors';
 import { NO_MATCH_DIGEST, digestsMatch, fakeSalt, hashKey } from './hashing';
-import { accountCounterKeys, clientIp, enforceRateLimit } from './rate-limit';
+import { accountCounterKeys, clientIp, enforceRateLimit, recordFailure } from './rate-limit';
 import { newSession, resolveSessionFromRequest, type Session } from './sessions';
 import {
   DELETE_ACCOUNT_STATEMENTS,
@@ -117,11 +117,10 @@ async function register(context: Context): Promise<Response> {
 }
 
 async function prelogin(context: Context): Promise<Response> {
-  const { request, db, pepper, now } = context;
+  const { request, db, pepper } = context;
   const address = email((await readJsonBody(request)).email);
-  await enforceRateLimit(db, pepper, 'prelogin', { ip: clientIp(request) }, now);
 
-  // The fake salt is computed on both paths so an unknown email takes the same work.
+  // Not counted in D1: it costs reads only and protects no secret. The fake salt is computed on both paths so an unknown email takes the same work.
   const [user, fake] = await Promise.all([findUserByEmail(db, address), fakeSalt(pepper, address)]);
   const kdf: KdfParams = user === null ? { ...DEFAULT_KDF_PARAMS } : kdfOf(user);
   return jsonData({ salt: user?.salt ?? fake, kdf });
@@ -132,10 +131,12 @@ async function login(context: Context): Promise<Response> {
   const body = await readJsonBody(request);
   const address = email(body.email);
   const loginKey = sentKey(body.loginKey, 'loginKey');
-  await enforceRateLimit(db, pepper, 'login', { ip: clientIp(request), email: address }, now);
+  const subjects = { ip: clientIp(request), email: address };
+  await enforceRateLimit(db, pepper, 'login', subjects, now);
 
   const user = await findUserByEmail(db, address);
   if (!(await keyMatches(pepper, 'login-key', user?.login_key_hash, loginKey)) || user === null) {
+    await recordFailure(db, pepper, 'login', subjects, now);
     throw invalidCredentials('Wrong email or password', 401);
   }
   const session = await newSession(db, pepper, user.id, now);
@@ -253,13 +254,15 @@ async function recoveryUser(context: Context, body: Record<string, unknown>): Pr
   const { request, db, pepper, now } = context;
   const address = email(body.email);
   const recoveryAuthKey = sentKey(body.recoveryAuthKey, 'recoveryAuthKey');
-  await enforceRateLimit(db, pepper, 'recovery', { ip: clientIp(request), email: address }, now);
+  const subjects = { ip: clientIp(request), email: address };
+  await enforceRateLimit(db, pepper, 'recovery', subjects, now);
 
   const user = await findUserByEmail(db, address);
   if (
     !(await keyMatches(pepper, 'recovery-key', user?.recovery_key_hash, recoveryAuthKey)) ||
     user === null
   ) {
+    await recordFailure(db, pepper, 'recovery', subjects, now);
     throw invalidCredentials('Wrong email or recovery code', 401);
   }
   return user;
@@ -330,7 +333,7 @@ async function deleteAccount(context: Context): Promise<Response> {
 
   const user = await requireUser(context, session);
   await proveLoginKey(context, user, loginKey);
-  const counters = await accountCounterKeys(pepper, user.id);
+  const counters = await accountCounterKeys(pepper, user.id, user.email);
   await db.batch([
     ...DELETE_ACCOUNT_STATEMENTS.map((sql) => db.prepare(sql).bind(user.id)),
     ...counters.map((key) => db.prepare('DELETE FROM rate_limits WHERE key = ?').bind(key)),

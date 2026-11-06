@@ -14,60 +14,165 @@ const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 
 /**
- * Limits per action. Each request counts against every bucket of its action: the global one
- * (a ceiling across all clients), the client's IP and, where it applies, the email or account.
- * Counters live in D1 because the Workers rate limiting binding is approximate, per location
- * and may not be available on the Free plan.
+ * Buckets, from the most specific to the most general, which is also the order they are
+ * evaluated in:
+ *
+ * - `ip`: the client's IP (IPv6 cut to its /64).
+ * - `account`: the account of the session.
+ * - `failedEmailIp`, `failedEmail`: failed attempts only, for one email from one IP and for one
+ *   email from anywhere. Counting only failures keeps anyone from locking an owner out with
+ *   their right password, and the per-IP bucket makes a targeted lockout need many IPs.
+ * - `global`: every client together, a ceiling for the action.
+ */
+type Bucket = 'ip' | 'account' | 'failedEmailIp' | 'failedEmail' | 'global';
+const ORDER: readonly Bucket[] = ['ip', 'account', 'failedEmailIp', 'failedEmail', 'global'];
+const FAILURES_ONLY: ReadonlySet<Bucket> = new Set(['failedEmailIp', 'failedEmail']);
+
+/**
+ * Limits per action. Counters live in D1 because the Workers rate limiting binding is
+ * approximate, per location and may not be available on the Free plan. Each counted bucket
+ * costs one written row, and D1 stops answering every query once the daily quota of written
+ * rows is spent, so the caps here are sized against that quota (see the README and
+ * `test/write-budget.test.ts`, which fails when a cap is raised past it). The salt step of the
+ * login is not counted in D1: it protects no secret and is left to a WAF rule.
  */
 export const LIMITS = {
-  register: { global: { max: 300, windowMs: HOUR }, ip: { max: 5, windowMs: HOUR } },
-  prelogin: {
-    global: { max: 3000, windowMs: 10 * MINUTE },
-    ip: { max: 30, windowMs: 10 * MINUTE },
-  },
+  register: { ip: { max: 5, windowMs: HOUR }, global: { max: 100, windowMs: DAY } },
   login: {
-    global: { max: 3000, windowMs: 10 * MINUTE },
     ip: { max: 20, windowMs: 10 * MINUTE },
-    email: { max: 10, windowMs: 10 * MINUTE },
+    failedEmailIp: { max: 5, windowMs: 10 * MINUTE },
+    failedEmail: { max: 50, windowMs: HOUR },
+    global: { max: 3000, windowMs: 10 * MINUTE },
   },
   recovery: {
-    global: { max: 300, windowMs: HOUR },
     ip: { max: 10, windowMs: HOUR },
-    email: { max: 5, windowMs: HOUR },
+    failedEmailIp: { max: 5, windowMs: HOUR },
+    failedEmail: { max: 20, windowMs: HOUR },
+    global: { max: 300, windowMs: HOUR },
   },
   /** Authenticated actions that take a login key as proof: password change, upgrade, delete. */
   proof: { account: { max: 10, windowMs: HOUR } },
   /**
    * Extraction proxy, per account, with a daily global cap well under the Workers request quota
-   * so a burst of new accounts cannot starve every other route.
+   * and the D1 write quota, so a burst of accounts cannot starve every other route.
    */
-  extract: { global: { max: 30_000, windowMs: DAY }, account: { max: 60, windowMs: 10 * MINUTE } },
+  extract: { account: { max: 60, windowMs: 10 * MINUTE }, global: { max: 10_000, windowMs: DAY } },
 } as const satisfies Record<string, Partial<Record<Bucket, Limit>>>;
 
 export type Action = keyof typeof LIMITS;
-type Bucket = 'global' | 'ip' | 'email' | 'account';
+
+/**
+ * Daily budget shared by every account action counted in D1. It is the most general bucket and
+ * is counted last, only when every other bucket of the request has room. Spent, nobody can
+ * register, log in or recover until the window ends, but open sessions keep working.
+ */
+export const AUTH_BUDGET: Limit = { max: 5000, windowMs: DAY };
+export const BUDGETED_ACTIONS: ReadonlySet<Action> = new Set([
+  'register',
+  'login',
+  'recovery',
+  'proof',
+]);
 
 /** Rows older than the longest window are dead and can be deleted. */
 export const LONGEST_WINDOW_MS = DAY;
 
-/** The values a request is counted under; the global bucket needs none. */
+/** The values a request is counted under; the global buckets need none. */
 export interface Subjects {
   readonly ip?: string;
   readonly email?: string;
   readonly account?: string;
 }
 
+interface Counter {
+  readonly bucket: Bucket;
+  readonly key: string;
+  readonly limit: Limit;
+}
+
+/**
+ * Counts one request in a bucket, unless the bucket is full: then it writes nothing and returns
+ * no row. A window that has passed starts again at 1.
+ */
 const HIT = `
 INSERT INTO rate_limits (key, window_start, count) VALUES (?1, ?2, 1)
 ON CONFLICT (key) DO UPDATE SET
   count = CASE WHEN rate_limits.window_start <= ?2 - ?3 THEN 1 ELSE rate_limits.count + 1 END,
   window_start = CASE WHEN rate_limits.window_start <= ?2 - ?3 THEN ?2 ELSE rate_limits.window_start END
-RETURNING count, window_start`;
+WHERE rate_limits.window_start <= ?2 - ?3 OR rate_limits.count < ?4
+RETURNING count`;
+
+function subjectOf(bucket: Bucket, { ip, email, account }: Subjects): string | undefined {
+  switch (bucket) {
+    case 'ip':
+      return ip;
+    case 'account':
+      return account;
+    case 'failedEmail':
+      return email;
+    case 'failedEmailIp':
+      return email === undefined || ip === undefined ? undefined : `${email}\u0000${ip}`;
+    case 'global':
+      return '';
+  }
+}
+
+/** The counters of a request, most specific first, with the shared budget last. */
+async function countersOf(pepper: string, action: Action, subjects: Subjects): Promise<Counter[]> {
+  const limits: Partial<Record<Bucket, Limit>> = LIMITS[action];
+  const counters: Counter[] = [];
+  for (const bucket of ORDER) {
+    const limit = limits[bucket];
+    const subject = subjectOf(bucket, subjects);
+    if (limit === undefined || subject === undefined) continue;
+    counters.push({ bucket, limit, key: await counterKey(pepper, action, bucket, subject) });
+  }
+  if (BUDGETED_ACTIONS.has(action)) {
+    counters.push({
+      bucket: 'global',
+      limit: AUTH_BUDGET,
+      key: await counterKey(pepper, 'auth', 'global', ''),
+    });
+  }
+  return counters;
+}
+
+/** How long until every full counter has room again, 0 when none is full. Reads only. */
+async function waitFor(db: D1Database, counters: Counter[], now: number): Promise<number> {
+  const { results } = await db
+    .prepare(
+      `SELECT key, window_start, count FROM rate_limits WHERE key IN (${counters.map(() => '?').join(', ')})`,
+    )
+    .bind(...counters.map(({ key }) => key))
+    .all<{ key: string; window_start: number; count: number }>();
+  let wait = 0;
+  for (const row of results) {
+    const { limit } = counters.find(({ key }) => key === row.key) as Counter;
+    const endsAt = row.window_start + limit.windowMs;
+    if (endsAt > now && row.count >= limit.max) wait = Math.max(wait, endsAt - now);
+  }
+  return wait;
+}
+
+/** Counts in each counter; returns those that were full and wrote nothing. */
+async function hit(db: D1Database, counters: Counter[], now: number): Promise<Counter[]> {
+  if (counters.length === 0) return [];
+  const results = await db.batch<{ count: number }>(
+    counters.map(({ key, limit }) => db.prepare(HIT).bind(key, now, limit.windowMs, limit.max)),
+  );
+  return counters.filter((_, index) => results[index]?.results.length === 0);
+}
 
 /**
- * Counts the request in every bucket of the action in one atomic batch and returns how long to
- * wait when any bucket is over its limit, or 0 when the request may go ahead. Subjects are
- * stored as HMACs.
+ * Counts the request and returns how long to wait when a bucket is full, or 0 when it may go
+ * ahead. A refused request writes no row:
+ *
+ * 1. Every bucket, failure buckets included, is read; any full one refuses the request.
+ * 2. The specific buckets (IP, account) are counted with a conditional upsert.
+ * 3. Only if all of them had room, the global bucket and the shared budget are counted.
+ *
+ * So one client over its own limit never fills the buckets every other client shares, not even
+ * with concurrent requests that all pass the read. Subjects are stored as HMACs.
  */
 export async function countRequest(
   db: D1Database,
@@ -76,27 +181,37 @@ export async function countRequest(
   subjects: Subjects,
   now = Date.now(),
 ): Promise<number> {
-  const limits: Partial<Record<Bucket, Limit>> = LIMITS[action];
-  const buckets: { limit: Limit; key: string }[] = [];
-  for (const [bucket, limit] of Object.entries(limits) as [Bucket, Limit][]) {
-    const subject = bucket === 'global' ? '' : subjects[bucket];
-    if (subject === undefined) continue;
-    buckets.push({ limit, key: await counterKey(pepper, action, bucket, subject) });
-  }
+  const counters = await countersOf(pepper, action, subjects);
+  const wait = await waitFor(db, counters, now);
+  if (wait > 0) return wait;
 
-  const results = await db.batch<{ count: number; window_start: number }>(
-    buckets.map(({ limit, key }) => db.prepare(HIT).bind(key, now, limit.windowMs)),
+  const counted = counters.filter(({ bucket }) => !FAILURES_ONLY.has(bucket));
+  const specific = counted.filter(({ bucket }) => bucket !== 'global');
+  const general = counted.filter(({ bucket }) => bucket === 'global');
+  const full = await hit(db, specific, now);
+  if (full.length === 0) full.push(...(await hit(db, general, now)));
+  // Filled by a concurrent request between the read and the write.
+  if (full.length > 0) return Math.max(await waitFor(db, full, now), 1000);
+  return 0;
+}
+
+/**
+ * Counts a failed attempt (a wrong login key or recovery key) in the failure buckets of the
+ * action. A full bucket writes nothing.
+ */
+export async function recordFailure(
+  db: D1Database,
+  pepper: string,
+  action: Action,
+  subjects: Subjects,
+  now = Date.now(),
+): Promise<void> {
+  const counters = await countersOf(pepper, action, subjects);
+  await hit(
+    db,
+    counters.filter(({ bucket }) => FAILURES_ONLY.has(bucket)),
+    now,
   );
-
-  let retryAfterMs = 0;
-  results.forEach((result, index) => {
-    const row = result.results[0];
-    const { limit } = buckets[index] as { limit: Limit };
-    if (row !== undefined && row.count > limit.max) {
-      retryAfterMs = Math.max(retryAfterMs, row.window_start + limit.windowMs - now);
-    }
-  });
-  return retryAfterMs;
 }
 
 /** Counts the request before any other work and throws a 429 with Retry-After when over. */
@@ -115,14 +230,30 @@ export async function enforceRateLimit(
   }
 }
 
-function counterKey(pepper: string, action: Action, bucket: Bucket, subject: string) {
+function counterKey(pepper: string, action: Action | 'auth', bucket: Bucket, subject: string) {
   return hmac(pepper, 'rate-limit', `${action}\u0000${bucket}\u0000${subject}`).then(toBase64Url);
 }
 
-/** Keys of every counter tied to an account id, so deleting the account can remove them. */
-export async function accountCounterKeys(pepper: string, accountId: string): Promise<string[]> {
-  const actions = (Object.keys(LIMITS) as Action[]).filter((action) => 'account' in LIMITS[action]);
-  return Promise.all(actions.map((action) => counterKey(pepper, action, 'account', accountId)));
+/**
+ * Keys of every counter tied to an account, so deleting the account can remove them: its
+ * per-account counters and, given its email, the failure counters of that email.
+ */
+export async function accountCounterKeys(
+  pepper: string,
+  accountId: string,
+  email?: string,
+): Promise<string[]> {
+  const actions = Object.keys(LIMITS) as Action[];
+  const limits = (action: Action): Partial<Record<Bucket, Limit>> => LIMITS[action];
+  const keys = actions
+    .filter((action) => limits(action).account !== undefined)
+    .map((action) => counterKey(pepper, action, 'account', accountId));
+  if (email !== undefined) {
+    for (const action of actions.filter((action) => limits(action).failedEmail !== undefined)) {
+      keys.push(counterKey(pepper, action, 'failedEmail', email));
+    }
+  }
+  return Promise.all(keys);
 }
 
 /** The extraction limits as a `RateLimiter`, keyed by account id, counted in D1. */

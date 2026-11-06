@@ -60,6 +60,27 @@ describe('DELETE /api/account', () => {
     expect({ tracked: counters.length, left: left?.n }).toEqual({ tracked: 2, left: 0 });
   });
 
+  it('should delete the failed attempt counters of its email', async () => {
+    const { email, keys, token } = await register();
+    await call(API_PATHS.login, { body: { email, loginKey: randomKey() } });
+    await call(API_PATHS.recoveryStart, { body: { email, recoveryAuthKey: randomKey() } });
+    const userId = (await env.DB.prepare('SELECT id FROM users').first<{ id: string }>())?.id;
+    const all = await accountCounterKeys(env.PEPPER, userId as string, email);
+    const byEmail = all.slice((await accountCounterKeys(env.PEPPER, userId as string)).length);
+    const count = () =>
+      env.DB.prepare(
+        `SELECT count(*) AS n FROM rate_limits WHERE key IN (${byEmail.map(() => '?').join(', ')})`,
+      )
+        .bind(...byEmail)
+        .first<{ n: number }>()
+        .then((row) => row?.n);
+    const before = await count();
+
+    await dataOf(await deleteAccount(token, keys.loginKey));
+
+    expect({ before, after: await count() }).toEqual({ before: 2, after: 0 });
+  });
+
   it('should free the email for a new registration', async () => {
     const { email, keys, token } = await register();
 
