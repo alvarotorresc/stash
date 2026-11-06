@@ -36,7 +36,7 @@ export interface ReaderResult {
   author: string | null;
   siteName: string | null;
   /**
-   * Preview image (http/https only). Never load it directly from the client: download it through
+   * Preview image (http/https only, never `localhost` or a non-public literal IP). Never load it directly from the client: download it through
    * the proxy so no third party learns what is being read.
    */
   imageUrl: string | null;

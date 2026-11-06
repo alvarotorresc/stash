@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cleanText, toIsoDate } from './meta';
+import { cleanText, extractMeta, toIsoDate } from './meta';
 
 describe('cleanText', () => {
   it('should collapse whitespace and cap the length', () => {
@@ -30,5 +30,19 @@ describe('cleanText with spoofing characters', () => {
   it('should not split a surrogate pair when capping', () => {
     const out = cleanText(`abc${'😀'.repeat(10)}`, 5) ?? '';
     expect(() => encodeURIComponent(out)).not.toThrow();
+  });
+});
+
+describe('extractMeta image', () => {
+  it.each([
+    'http://169.254.169.254/latest/meta-data/',
+    'http://127.0.0.1:8080/a.png',
+    'http://localhost/a.png',
+  ])('should drop the internal-network image %s', (image) => {
+    const doc = new DOMParser().parseFromString(
+      `<meta property="og:image" content="${image}">`,
+      'text/html',
+    );
+    expect(extractMeta(doc, 'https://blog.example.com/a').imageUrl).toBeNull();
   });
 });

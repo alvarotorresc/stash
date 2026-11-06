@@ -84,6 +84,15 @@ describe('sanitizeHtml', () => {
     expect(image?.hasAttribute(IMAGE_SOURCE_ATTRIBUTE)).toBe(false);
   });
 
+  it.each([
+    'http://127.0.0.1:8080/admin',
+    'http://169.254.169.254/x.png',
+    'http://localhost/a.png',
+  ])('should not keep a marker for the internal-network image %s', (src) => {
+    const image = render(`<img src="${src}" alt="A">`).querySelector('img');
+    expect(image?.hasAttribute(IMAGE_SOURCE_ATTRIBUTE)).toBe(false);
+  });
+
   it('should drop class, id and data attributes', () => {
     const out = sanitizeHtml('<p class="a" id="b" data-x="c" aria-label="d">x</p>', BASE);
     expect(out).toBe('<p>x</p>');

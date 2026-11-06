@@ -1,5 +1,5 @@
 import { normalizeText, truncate } from './text';
-import { resolveHttpUrl } from './url';
+import { resolveHttpUrl, resolvePublicHttpUrl } from './url';
 
 export interface PageMeta {
   title: string | null;
@@ -68,7 +68,7 @@ export function extractMeta(doc: Document, baseUrl: string): PageMeta {
     // `article:author` is often a profile URL rather than a name.
     author: author && /^https?:\/\//i.test(author) ? null : cleanText(author),
     siteName: cleanText(first(meta, ['og:site_name', 'application-name'])),
-    imageUrl: resolveHttpUrl(
+    imageUrl: resolvePublicHttpUrl(
       first(meta, [
         'og:image:secure_url',
         'og:image',

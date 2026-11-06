@@ -1,6 +1,6 @@
 import DOMPurify, { type Config, type DOMPurify as Purifier } from 'dompurify';
 import { normalizeText } from './text';
-import { resolveHttpUrl } from './url';
+import { resolveHttpUrl, resolvePublicHttpUrl } from './url';
 
 /** Attribute that keeps the original image URL of an `<img>` without letting it load. */
 export const IMAGE_SOURCE_ATTRIBUTE = 'data-stash-src';
@@ -91,7 +91,7 @@ function getPurifier(): Purifier {
         node.removeAttribute('href');
       }
     } else if (node.nodeName === 'IMG') {
-      const src = resolveHttpUrl(node.getAttribute('src'), currentBaseUrl);
+      const src = resolvePublicHttpUrl(node.getAttribute('src'), currentBaseUrl);
       node.removeAttribute('src');
       if (src) node.setAttribute(IMAGE_SOURCE_ATTRIBUTE, src);
     }
@@ -121,7 +121,8 @@ const CONFIG: Config = {
  * - Links: only http(s) (resolved against `baseUrl`) and `mailto:`; anything else loses its
  *   `href`. Every kept link gets `target="_blank"` and `rel="noopener noreferrer"`.
  * - Images never load: `src` is removed and the resolved http(s) URL moves to `data-stash-src`, so
- *   the app can fetch it through the proxy if it wants. No request reaches a third party.
+ *   the app can fetch it through the proxy if it wants. No request reaches a third party. URLs on
+ *   `localhost` or on a non-public literal IP are dropped.
  */
 export function sanitizeHtml(html: string, baseUrl: string): string {
   const instance = getPurifier();
