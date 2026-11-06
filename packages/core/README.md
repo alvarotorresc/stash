@@ -100,3 +100,28 @@ can re-wrap the data key under a password someone else chooses.
 - The server can serve an older version of a record, hide records or return a deleted one: the
   blob is bound to its record id, not to a version.
 - Blob size reveals the exact plaintext size (a fixed 29-byte overhead).
+
+## Accounts
+
+`createAccountClient({ dataKeyStore, sessionStore, onLogout, baseUrl?, fetch? })` combines the
+key chain with the account API. It never stores or sends the password.
+
+| Method                                             | What it does                                                                                      |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `register({ email, password })`                    | Creates the account and logs in. Returns the recovery code to show once.                          |
+| `login({ email, password })`                       | Two steps: salt and parameters, then the login key. Sends the Argon2id upgrade when there is one. |
+| `logout()`                                         | Closes the session on the server when it can, then always clears the data key, session and cache. |
+| `changePassword({ currentPassword, newPassword })` | Re-wraps the data key; the server closes the other sessions.                                      |
+| `recover({ email, recoveryCode, newPassword })`    | Sets a new password and recovery code; the server closes every session.                           |
+| `deleteAccount({ password })`                      | Proves the password, deletes the account and clears everything local.                             |
+| `getSession()`                                     | The stored session, or `null` when there is none or it expired.                                   |
+
+- Every password entry saves the data key with `afterPasswordEntry: true`.
+- `onLogout` runs after logout and account deletion so the local record cache can wipe itself.
+- Sessions live in a `SessionStore`: `createMemorySessionStore()`, or
+  `createWebStorageSessionStore(localStorage)`. A script running on the origin can read the token
+  in Web Storage, just as it can use the remembered data key.
+- Failures are `AccountApiError` with the server's `code` (`INVALID_CREDENTIALS`,
+  `RATE_LIMITED` with `retryAfter`, `UNAUTHORIZED`...), `NETWORK_ERROR` or `BAD_RESPONSE`.
+- The wire contract is exported without any cryptography from `@stash/core/protocol`, which is
+  what the Worker imports.
