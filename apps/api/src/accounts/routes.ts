@@ -159,9 +159,24 @@ async function getAccount(context: Context): Promise<Response> {
     email: user.email,
     salt: user.salt,
     kdf: kdfOf(user),
-    wrappedDataKey: user.wrapped_data_key,
     createdAt: user.created_at,
   });
+}
+
+/**
+ * First step of a password change: the wrapped data key, only after the current login key is
+ * proven, as on login. A session token alone never gets it, so a stolen token is no oracle for
+ * guessing the password offline.
+ */
+async function beginPasswordChange(context: Context): Promise<Response> {
+  const { request, db, pepper, now } = context;
+  const session = await requireSession(context);
+  const currentLoginKey = sentKey((await readJsonBody(request)).currentLoginKey, 'currentLoginKey');
+  await enforceRateLimit(db, pepper, 'proof', { account: session.userId }, now);
+
+  const user = await requireUser(context, session);
+  await proveLoginKey(context, user, currentLoginKey);
+  return jsonData({ wrappedDataKey: user.wrapped_data_key });
 }
 
 /**
@@ -350,6 +365,7 @@ const ROUTES: Record<string, Partial<Record<Method, Handler>>> = {
   [API_PATHS.recoveryComplete]: { POST: completeRecovery },
   [API_PATHS.account]: { GET: getAccount, DELETE: deleteAccount },
   [API_PATHS.password]: { PUT: changePassword },
+  [API_PATHS.passwordBegin]: { POST: beginPasswordChange },
   [API_PATHS.kdf]: { PUT: upgradeKdf },
 };
 

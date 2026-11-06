@@ -1,5 +1,5 @@
 import {
-  changePassword as rewrapUnderNewPassword,
+  beginPasswordChange,
   createAccountKeys,
   derivePasswordCredentials,
   deriveRecoveryCredentials,
@@ -13,6 +13,7 @@ import {
   type AccountResponse,
   type LoginResponse,
   type OkResponse,
+  type PasswordBeginResponse,
   type PreloginResponse,
   type RecoveryCompleteResponse,
   type RecoveryStartResponse,
@@ -173,22 +174,30 @@ export function createAccountClient(options: AccountClientOptions): AccountClien
     async changePassword({ currentPassword, newPassword }) {
       const token = await requireToken();
       const account = await getAccount(token);
-      const result = await rewrapUnderNewPassword({
+      const change = await beginPasswordChange({
         email: account.email,
         currentPassword,
         newPassword,
         salt: account.salt,
         kdf: account.kdf,
-        wrappedDataKey: account.wrappedDataKey,
       });
+      // The wrapped data key is only handed out against proof of the current password.
+      const { currentLoginKey } = change;
+      const { wrappedDataKey } = await api<PasswordBeginResponse>({
+        method: 'POST',
+        path: API_PATHS.passwordBegin,
+        token,
+        body: { currentLoginKey },
+      });
+      const { server, dataKey } = await change.rewrap(wrappedDataKey);
       await api<OkResponse>({
         method: 'PUT',
         path: API_PATHS.password,
         token,
-        body: { currentLoginKey: result.currentLoginKey, keys: result.server },
+        body: { currentLoginKey, keys: server },
       });
-      await dataKeyStore.save(result.dataKey, { afterPasswordEntry: true });
-      return { dataKey: result.dataKey };
+      await dataKeyStore.save(dataKey, { afterPasswordEntry: true });
+      return { dataKey };
     },
 
     async recover({ email, recoveryCode, newPassword }) {

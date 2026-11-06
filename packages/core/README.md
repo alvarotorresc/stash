@@ -76,7 +76,10 @@ Errors are `CryptoError` with a `code`: `CREDENTIALS_USED`, `DECRYPTION_FAILED`,
 Password and recovery credentials are single use: `unlockDataKey` and `recoverAccount` consume
 them and a second call throws `CREDENTIALS_USED`. Do not keep them in long-lived state.
 `changePassword` takes the current password, not credentials, so nothing left over from a login
-can re-wrap the data key under a password someone else chooses.
+can re-wrap the data key under a password someone else chooses. The account client changes the
+password in two steps with the same guarantee: the current password's keys give
+`currentLoginKey`, which the server must accept before it hands out the wrapped data key, and the
+single-use handle then re-wraps it.
 
 ### Remembered data key
 
@@ -111,7 +114,7 @@ key chain with the account API. It never stores or sends the password.
 | `register({ email, password })`                    | Creates the account and logs in. Returns the recovery code to show once.                          |
 | `login({ email, password })`                       | Two steps: salt and parameters, then the login key. Sends the Argon2id upgrade when there is one. |
 | `logout()`                                         | Closes the session on the server when it can, then always clears the data key, session and cache. |
-| `changePassword({ currentPassword, newPassword })` | Re-wraps the data key; the server closes the other sessions.                                      |
+| `changePassword({ currentPassword, newPassword })` | Proves the current password to get the wrapped data key, re-wraps it; other sessions are closed.  |
 | `recover({ email, recoveryCode, newPassword })`    | Sets a new password and recovery code; the server closes every session.                           |
 | `deleteAccount({ password })`                      | Proves the password, deletes the account and clears everything local.                             |
 | `getSession()`                                     | The stored session, or `null` when there is none or it expired.                                   |

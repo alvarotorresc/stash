@@ -50,7 +50,7 @@ export const LIMITS = {
     failedEmail: { max: 20, windowMs: HOUR },
     global: { max: 300, windowMs: HOUR },
   },
-  /** Authenticated actions that take a login key as proof: password change, upgrade, delete. */
+  /** Actions proven with the login key: both password change steps, upgrade and deletion. */
   proof: { account: { max: 10, windowMs: HOUR } },
   /**
    * Extraction proxy, per account, with a daily global cap well under the Workers request quota

@@ -46,6 +46,12 @@ The account routes (`/api/auth/*` and `/api/account*`) live in `src/accounts/`. 
 route, extraction included, resolves its session from the `Authorization: Bearer` token through
 `createSessionResolver` in `src/auth/session.ts`: unknown, closed or expired tokens answer 401.
 
+A session token alone never gets the wrapped data key: `GET /api/account` returns only the
+email, salt, parameters and creation date. Otherwise a stolen token would let anyone try
+passwords offline, with no rate limit. Changing the password takes two steps, both proven with
+the current login key and counted per account: `POST /api/account/password/begin` returns the
+wrapped data key, as the login does, and `PUT /api/account/password` stores the new setup.
+
 ### Requests from other sites
 
 The API answers no CORS headers and its `OPTIONS` preflight gets 405, so a page on another

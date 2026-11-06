@@ -188,6 +188,37 @@ describe('createAccountClient', () => {
       }).toEqual({ plaintext: [1], old: 'INVALID_CREDENTIALS' });
     });
 
+    it('should get the wrapped data key only by proving the current password', async () => {
+      const { client, server } = await registered();
+      server.calls.length = 0;
+
+      await client.changePassword({ currentPassword: PASSWORD, newPassword: NEW_PASSWORD });
+
+      expect(
+        server.calls.map(({ method, path, body }) => [method, path, Object.keys(body ?? {})]),
+      ).toEqual([
+        ['GET', API_PATHS.account, []],
+        ['POST', API_PATHS.passwordBegin, ['currentLoginKey']],
+        ['PUT', API_PATHS.password, ['currentLoginKey', 'keys']],
+      ]);
+    });
+
+    it('should change nothing when the current password is wrong', async () => {
+      const { client, server, keys } = await registered();
+      const before = server.users.get(EMAIL)?.keys;
+
+      const error = await client
+        .changePassword({ currentPassword: 'not the password', newPassword: NEW_PASSWORD })
+        .catch((e) => e);
+
+      expect({
+        code: (error as AccountApiError).code,
+        keys: server.users.get(EMAIL)?.keys === before,
+        saves: keys.state.saves,
+        put: server.calls.some(({ path }) => path === API_PATHS.password),
+      }).toEqual({ code: 'INVALID_CREDENTIALS', keys: true, saves: [true], put: false });
+    });
+
     it('should remember the data key again after the password entry', async () => {
       const { client, keys } = await registered();
 
