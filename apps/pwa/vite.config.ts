@@ -9,6 +9,8 @@ export default defineConfig({
       strategies: 'injectManifest',
       srcDir: 'src',
       filename: 'sw.ts',
+      // The self-hosted fonts too, so the app looks the same offline.
+      injectManifest: { globPatterns: ['**/*.{js,css,html,woff2}'] },
       manifest: {
         name: 'Stash',
         short_name: 'Stash',
@@ -19,6 +21,18 @@ export default defineConfig({
         lang: 'es',
         background_color: '#eef0ea',
         theme_color: '#eef0ea',
+        // Chrome on Android needs PNG icons at 192 and 512 to install the app,
+        // and the share sheet only lists installed apps.
+        icons: [
+          { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
+          { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png' },
+          {
+            src: '/icons/icon-maskable-512.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'maskable',
+          },
+        ],
         // Android share sheet: the service worker answers this POST (src/share.ts).
         share_target: {
           action: '/share',

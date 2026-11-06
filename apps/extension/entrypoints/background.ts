@@ -1,10 +1,12 @@
 import { browser } from 'wxt/browser';
 import { defineBackground } from 'wxt/utils/define-background';
 import { registerSaveLinkMenu } from '../lib/contextMenu';
-import { createMockPopupService } from '../lib/mock';
+import { createMessageHandler, listenToMessages } from '../lib/router';
+import { createBackgroundActions } from '../lib/services';
 
 export default defineBackground(() => {
-  // Until the real client exists, saves go to the in-memory example service.
-  const service = createMockPopupService();
-  registerSaveLinkMenu(browser, (page) => service.save(page));
+  // Listeners are added synchronously so the browser can wake the background for them.
+  const handle = createMessageHandler(createBackgroundActions());
+  listenToMessages(browser, handle);
+  registerSaveLinkMenu(browser, handle);
 });

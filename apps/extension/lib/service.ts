@@ -6,9 +6,22 @@ import type { PasswordStrength, Priority, TagSuggestion, Tone } from '@stash/ui'
  * The in-memory mock implements it today; the real client comes later.
  */
 
+export interface MetaTag {
+  /** The `name` or `property` attribute, lower case. */
+  key: string;
+  content: string;
+}
+
 export interface Page {
   url: string;
   title: string;
+  /**
+   * HTML of the open tab, for reader mode on the device. Absent when the page could not be read
+   * (browser pages, stores, PDF viewer) or was too large; the service then extracts it from the URL.
+   */
+  html?: string;
+  /** Meta tags of the open tab, kept even when the HTML was too large to send. */
+  meta?: MetaTag[];
 }
 
 export interface SavedItem {
