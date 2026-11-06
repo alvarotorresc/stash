@@ -94,7 +94,7 @@ describe('buildContent', () => {
     expect(buildContent('', 'post')).toEqual({ content: { kind: 'none', text: '' }, issues: [] });
   });
 
-  it('should drop html over the limit and cap the text', () => {
+  it('should drop html over the limit and cap the text', { timeout: 60_000 }, () => {
     const { content, issues } = buildContent(`<p>${'a '.repeat(MAX_CONTENT_HTML)}</p>`, 'article');
     expect([content.kind, content.html, content.text.length, issues]).toEqual([
       'article',

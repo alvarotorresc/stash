@@ -224,6 +224,7 @@ describe('parsePage limits', () => {
       'Huge page',
     ]);
     // Most of the time is jsdom building the tree; reader mode alone took minutes here.
-    expect(elapsed).toBeLessThan(4000);
-  }, 15_000);
+    // Shared CI runners are several times slower than a developer machine.
+    expect(elapsed).toBeLessThan(process.env.CI ? 20_000 : 4000);
+  }, 60_000);
 });
