@@ -17,16 +17,17 @@ CREATE TABLE users (
   updated_at INTEGER NOT NULL
 ) STRICT;
 
+-- Without a rowid, storing a session writes the row and its `user_id` index entry only. Expired
+-- sessions are deleted by the daily sweep, which scans the table instead of keeping an index.
 CREATE TABLE sessions (
   -- HMAC of the bearer token; the token itself only exists on the client.
   token_hash TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
   expires_at INTEGER NOT NULL,
   created_at INTEGER NOT NULL
-) STRICT;
+) STRICT, WITHOUT ROWID;
 
 CREATE INDEX sessions_user_id ON sessions (user_id);
-CREATE INDEX sessions_expires_at ON sessions (expires_at);
 
 -- Fixed-window counters. `key` is an HMAC of the bucket and its subject (IP, email or account),
 -- so neither emails nor IP addresses are stored in clear. Without a rowid or a secondary index,

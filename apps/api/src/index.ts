@@ -2,6 +2,7 @@ import { handleAccountsRequest, isAccountsPath } from './accounts/routes';
 import type { AccountsEnv } from './accounts/env';
 import { readPepper } from './accounts/env';
 import { createExtractRateLimiter } from './accounts/rate-limit';
+import { sweepExpiredRows } from './accounts/sweep';
 import { createSessionResolver } from './auth/session';
 import { createExtractRoutes, DEFAULT_LIMITS } from './extract/routes';
 import { jsonData, jsonError } from './http';
@@ -36,5 +37,10 @@ export default {
     if (extractResponse) return extractResponse;
 
     return jsonError('NOT_FOUND', 'Not found', 404);
+  },
+
+  /** Daily cron trigger: deletes expired sessions and dead rate limit windows. */
+  async scheduled(controller, env): Promise<void> {
+    await sweepExpiredRows(env.DB, controller.scheduledTime);
   },
 } satisfies ExportedHandler<AccountsEnv>;

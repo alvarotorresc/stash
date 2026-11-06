@@ -78,19 +78,6 @@ describe('authenticated routes', () => {
     });
   });
 
-  it('should sweep expired sessions when a new one is created', async () => {
-    const { email, keys, token } = await register();
-    await env.DB.prepare('UPDATE sessions SET expires_at = ?')
-      .bind(Date.now() - 1)
-      .run();
-
-    await login(email, keys.loginKey);
-    const old = await call(API_PATHS.account, { token });
-    const count = await env.DB.prepare('SELECT count(*) AS n FROM sessions').first<{ n: number }>();
-
-    expect({ old: old.status, sessions: count?.n }).toEqual({ old: 401, sessions: 1 });
-  });
-
   it('should set sessions to expire 30 days after they start', () => {
     expect(SESSION_TTL_MS).toBe(30 * 24 * 60 * 60 * 1000);
   });
