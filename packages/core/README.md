@@ -212,5 +212,5 @@ The wire contract is exported without cryptography from `@stash/core/sync-protoc
   leaves a tombstone. Answers `{ data: { results: [{ id, applied, version }] } }` in order.
 - `GET /api/records?cursor=<n>&limit=<n>` answers `{ data: WireRecord[], meta: { nextCursor,
 hasMore } }` in version order. Cursor `0` is the first load and leaves tombstones out.
-- Versions are assigned by the server, increasing per account. Limits: 1 MiB per blob, 20 000
-  records and 50 MiB per account. Both need a Bearer session and share a per-account rate limit.
+- Versions are assigned by the server, increasing per account. Limits: 1 MiB per blob, 5 000
+  records and 25 MiB per account. Both need a Bearer session and count in per-account rate limits.

@@ -40,9 +40,9 @@ export const MAX_PULL_LIMIT = 500;
 export const MAX_PULL_PAGE_BYTES = 3 * 1024 * 1024;
 
 /** Most records an account can keep, deleted ones included (they stay as small tombstones). */
-export const MAX_RECORDS_PER_ACCOUNT = 20_000;
-/** Most blob bytes an account can keep (decoded). */
-export const MAX_BYTES_PER_ACCOUNT = 50 * 1024 * 1024;
+export const MAX_RECORDS_PER_ACCOUNT = 5_000;
+/** Most blob bytes an account can keep (decoded): 5 KiB per record on average. */
+export const MAX_BYTES_PER_ACCOUNT = 25 * 1024 * 1024;
 
 /** Record ids are random UUIDs generated on the client, in lowercase canonical form. */
 export const RECORD_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
