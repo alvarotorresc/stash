@@ -46,6 +46,22 @@ The account routes (`/api/auth/*` and `/api/account*`) live in `src/accounts/`. 
 route, extraction included, resolves its session from the `Authorization: Bearer` token through
 `createSessionResolver` in `src/auth/session.ts`: unknown, closed or expired tokens answer 401.
 
+### Requests from other sites
+
+The API answers no CORS headers and its `OPTIONS` preflight gets 405, so a page on another
+origin cannot send a request a browser would preflight. Two checks close what is left:
+
+- Every route with a body requires `Content-Type: application/json` (a `charset` is allowed)
+  and answers 415 `UNSUPPORTED_MEDIA_TYPE` otherwise, before counting the request. A
+  `text/plain` or form POST would be a "simple" request that browsers send across origins
+  without a preflight, spreading abuse over the IPs of another site's visitors.
+- Any `/api/*` request with `Sec-Fetch-Site: cross-site` answers 403 `CROSS_SITE_REQUEST`.
+  Clients that are not browsers do not send the header and go through.
+
+The browser extension will call the API from its own origin. When it arrives, it needs an
+explicit exception for that origin (CORS limited to it, and the cross-site check allowing it);
+the bearer token stays the real defence.
+
 ## Rate limiting
 
 Counters live in D1 (`rate_limits`), in fixed windows keyed by an HMAC of the bucket and its

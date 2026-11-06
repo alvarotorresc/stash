@@ -7,6 +7,7 @@ import { BASE_URL, errorOf, uniqueEmail } from './helpers';
 function prelogin(): Request {
   return new Request(`${BASE_URL}${API_PATHS.prelogin}`, {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email: uniqueEmail() }),
   });
 }

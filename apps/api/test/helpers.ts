@@ -33,12 +33,12 @@ export interface CallOptions {
 export function call(path: string, options: CallOptions = {}): Promise<Response> {
   const headers: Record<string, string> = {
     'CF-Connecting-IP': options.ip ?? randomIp(),
+    ...(options.body === undefined ? {} : { 'Content-Type': 'application/json' }),
     ...options.headers,
   };
   if (options.token !== undefined) headers.Authorization = `Bearer ${options.token}`;
   let body: string | undefined;
   if (options.body !== undefined) {
-    headers['Content-Type'] = 'application/json';
     body = typeof options.body === 'string' ? options.body : JSON.stringify(options.body);
   }
   return exports.default.fetch(`${BASE_URL}${path}`, {

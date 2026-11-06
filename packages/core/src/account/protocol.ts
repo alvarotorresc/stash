@@ -39,6 +39,7 @@ export const API_PATHS = {
 
 /** Error codes the account API returns in `{ error: { code } }`. */
 export type AccountErrorCode =
+  | 'CROSS_SITE_REQUEST'
   | 'EMAIL_TAKEN'
   | 'INTERNAL_ERROR'
   | 'INVALID_CREDENTIALS'
@@ -47,6 +48,7 @@ export type AccountErrorCode =
   | 'PAYLOAD_TOO_LARGE'
   | 'RATE_LIMITED'
   | 'UNAUTHORIZED'
+  | 'UNSUPPORTED_MEDIA_TYPE'
   | 'VALIDATION_ERROR';
 
 /** An opaque bearer token and when it stops working (Unix time in milliseconds). */
