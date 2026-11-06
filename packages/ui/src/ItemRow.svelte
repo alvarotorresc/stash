@@ -99,6 +99,8 @@
     -webkit-line-clamp: 2;
     line-clamp: 2;
     -webkit-box-orient: vertical;
+    /* Provisional titles are long URLs without spaces. */
+    overflow-wrap: anywhere;
   }
   .s {
     display: -webkit-box;

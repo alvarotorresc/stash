@@ -58,7 +58,9 @@
   input:focus-visible {
     outline: none;
   }
-  input::-webkit-search-decoration {
+  /* The browser's clear button brings its own colour; deleting the text is enough. */
+  input::-webkit-search-decoration,
+  input::-webkit-search-cancel-button {
     appearance: none;
   }
 </style>
