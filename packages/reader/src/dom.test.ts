@@ -67,4 +67,27 @@ describe('parseHtmlPage', () => {
     const { baseUrl } = parseHtmlPage('<head><base href="javascript:alert(1)"></head>', URL_);
     expect(baseUrl).toBe(URL_);
   });
+
+  it('should neutralize inline styles before parsing, so the app CSP never sees them', () => {
+    const { doc } = parseHtmlPage(
+      '<head><style>p{color:red}</style></head><p style="color:red" title="a style=b">x</p>' +
+        '<svg><path style="stroke:url(#a)"/><style>.a{color:blue}</style></svg>' +
+        '<pre>&lt;p style="color:red"&gt;</pre>',
+      URL_,
+    );
+
+    expect([
+      doc.querySelectorAll('[style]').length,
+      doc.querySelectorAll('style').length,
+      doc.querySelector('p')?.getAttribute('title'),
+      doc.querySelector('pre')?.textContent,
+      doc.body.textContent?.includes('blue'),
+    ]).toEqual([0, 0, 'a style=b', '<p style="color:red">', false]);
+  });
+
+  it.each(['<a', '<a ', '<a "'])('should neutralize unclosed tags quickly: %s', (unit) => {
+    const started = performance.now();
+    parseHtmlPage(unit.repeat(20_000), URL_);
+    expect(performance.now() - started).toBeLessThan(2000);
+  });
 });
