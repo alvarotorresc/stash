@@ -46,13 +46,10 @@ export function createMemorySessionStore(): SessionStore {
  * Keeps the session in a Web Storage area such as `localStorage`. A record that does not look
  * like a session is deleted when read.
  */
-export function createWebStorageSessionStore(
-  storage: Storage,
-  key = 'stash-session',
-): SessionStore {
+export function createWebStorageSessionStore(area: Storage, key = 'stash-session'): SessionStore {
   return {
     async load() {
-      const raw = storage.getItem(key);
+      const raw = area.getItem(key);
       if (raw === null) return null;
       let parsed: unknown;
       try {
@@ -61,14 +58,14 @@ export function createWebStorageSessionStore(
         parsed = null;
       }
       if (isStoredSession(parsed)) return parsed;
-      storage.removeItem(key);
+      area.removeItem(key);
       return null;
     },
     async save(session) {
-      storage.setItem(key, JSON.stringify(session));
+      area.setItem(key, JSON.stringify(session));
     },
     async clear() {
-      storage.removeItem(key);
+      area.removeItem(key);
     },
   };
 }
