@@ -7,14 +7,16 @@
     children: Snippet;
     /** Links under the form. */
     footer?: Snippet;
+    /** The word Stash on top; left out under a back bar. */
+    wordmark?: boolean;
   }
 
-  let { title, lead, children, footer }: Props = $props();
+  let { title, lead, children, footer, wordmark = true }: Props = $props();
 </script>
 
 <main class="auth">
-  <span class="word">Stash</span>
-  <h1>{title}</h1>
+  {#if wordmark}<span class="word">Stash</span>{/if}
+  <h1 class:first={!wordmark}>{title}</h1>
   <p class="lead">{lead}</p>
   {@render children()}
   {#if footer}<div class="foot">{@render footer()}</div>{/if}
@@ -35,6 +37,11 @@
   }
   h1 {
     margin: 28px 0 6px;
+  }
+  h1.first {
+    margin-top: 0;
+  }
+  h1 {
     font-size: var(--fs-display);
     line-height: 1.15;
     letter-spacing: -0.025em;

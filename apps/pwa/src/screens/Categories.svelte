@@ -26,7 +26,7 @@
 </script>
 
 <TabLayout active="categories">
-  <ScreenTitle title="Categorías" />
+  <div class="title"><ScreenTitle title="Categorías" /></div>
   <div class="body">
     {#if !app.online}
       <InlineNotice icon="cloud_off" title="Sin conexión">
@@ -57,6 +57,10 @@
 </TabLayout>
 
 <style>
+  /* No app header on this tab: the title keeps clear of the status bar. */
+  .title {
+    padding-top: calc(16px + env(safe-area-inset-top, 0px));
+  }
   .body {
     display: flex;
     flex-direction: column;

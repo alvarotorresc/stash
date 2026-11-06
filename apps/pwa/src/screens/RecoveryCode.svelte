@@ -48,12 +48,13 @@
   .screen {
     flex: 1;
     min-height: 0;
-    padding: calc(24px + env(safe-area-inset-top, 0px)) 20px 32px;
+    /* The recovery screen brings its own side gutter. */
+    padding: calc(24px + env(safe-area-inset-top, 0px)) 0 32px;
     overflow-y: auto;
   }
   .word {
     display: block;
-    margin-bottom: 28px;
+    margin: 0 24px 16px;
     font-size: var(--fs-word);
     font-weight: 700;
     letter-spacing: -0.02em;

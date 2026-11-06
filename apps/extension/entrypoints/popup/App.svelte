@@ -222,14 +222,16 @@
     </p>
   {:else if view.name === 'recovery'}
     {@const code = view.code}
-    <RecoveryCodeScreen
-      {code}
-      {copied}
-      bind:confirmed
-      oncopy={() => copyCode(code)}
-      ondownload={() => downloadCode(code)}
-      oncontinue={saveTab}
-    />
+    <div class="bleed">
+      <RecoveryCodeScreen
+        {code}
+        {copied}
+        bind:confirmed
+        oncopy={() => copyCode(code)}
+        ondownload={() => downloadCode(code)}
+        oncontinue={saveTab}
+      />
+    </div>
   {:else if view.name === 'unsupported'}
     <h1 class="visually-hidden">Guardar página</h1>
     <InlineNotice icon="link_off" title="Esta página no se puede guardar">
@@ -298,6 +300,10 @@
     flex-direction: column;
     gap: 16px;
     padding: 8px 20px 20px;
+  }
+  /* The recovery screen brings its own side gutter. */
+  .bleed {
+    margin: 0 -20px;
   }
   .hd {
     display: flex;

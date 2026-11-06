@@ -36,6 +36,7 @@
 
 <SubpageBar heading={false} onback={() => app.router.back({ name: 'login' })} />
 <AuthLayout
+  wordmark={false}
   title="Recuperar con tu código"
   lead="Escribe el código que guardaste al crear la cuenta y elige una contraseña nueva. Tus datos siguen ahí."
 >
