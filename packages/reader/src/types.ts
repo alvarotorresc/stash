@@ -12,7 +12,10 @@ export type ContentKind = 'article' | 'post' | 'tweet' | 'none';
 
 export interface ReaderContent {
   kind: ContentKind;
-  /** Sanitized HTML, safe to render. Absent when there is nothing to render. */
+  /**
+   * Sanitized HTML. Absent when there is nothing to render or it was too long. Before rendering,
+   * always pass it through `sanitizeStoredHtml`, also when it comes from a cache or from sync.
+   */
   html?: string;
   /** Plain text of the content (one block per line), for search. Empty when `kind` is `none`. */
   text: string;
