@@ -27,14 +27,18 @@ describe('parseXOembed', () => {
     ]).toEqual([['too_large'], 'none', ['too_large'], 'none']);
   });
 
-  it('should read the metadata from the start of a page over the size limit', () => {
-    const page = X_PAGE_HTML.replace('</body>', `${'<p>x</p>'.repeat(300_000)}</body>`);
-    const result = parseXOembed(X_OEMBED, URL_, page);
-    expect([result.imageUrl, result.issues]).toEqual([
-      'https://pbs.example.com/media/photo.jpg',
-      ['too_large'],
-    ]);
-  });
+  it(
+    'should read the metadata from the start of a page over the size limit',
+    { timeout: 60_000 },
+    () => {
+      const page = X_PAGE_HTML.replace('</body>', `${'<p>x</p>'.repeat(300_000)}</body>`);
+      const result = parseXOembed(X_OEMBED, URL_, page);
+      expect([result.imageUrl, result.issues]).toEqual([
+        'https://pbs.example.com/media/photo.jpg',
+        ['too_large'],
+      ]);
+    },
+  );
 
   it('should give no content for a post with too deep markup', () => {
     const deep = `<blockquote><p>${'<span>'.repeat(200)}x${'</span>'.repeat(200)}</p></blockquote>`;

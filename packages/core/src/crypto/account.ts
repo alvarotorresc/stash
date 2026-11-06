@@ -14,7 +14,10 @@ import {
 import { INFO, splitKeyMaterial, type SplitKeys } from './key-chain';
 import { assertNewPassword } from './password-policy';
 import type { DataKey } from './records';
+import type { PasswordSetup, RecoverySetup } from './setup';
 import { generateRecoveryCode, parseRecoveryCode } from './recovery-code';
+
+export type { PasswordSetup, RecoverySetup } from './setup';
 
 /**
  * Key chain, version 1:
@@ -30,20 +33,6 @@ const WRAP_CONTEXT = {
   password: 'data-key:password',
   recovery: 'data-key:recovery',
 } as const;
-
-/** What the server stores for the password. */
-export interface PasswordSetup {
-  readonly salt: string;
-  readonly kdf: KdfParams;
-  readonly loginKey: string;
-  readonly wrappedDataKey: string;
-}
-
-/** What the server stores for the recovery code. */
-export interface RecoverySetup {
-  readonly recoveryAuthKey: string;
-  readonly recoveryWrappedDataKey: string;
-}
 
 export interface AccountKeys {
   /** Sent to the server. Keys are base64url; the server stores only their hashes. */
@@ -266,20 +255,66 @@ export async function derivePasswordCredentials({
   return new PasswordCredentialsHandle(sentKey, kek, upgrade);
 }
 
+/** Single use: `rewrap` works once. Do not keep it in long-lived state. */
+export interface PasswordChange {
+  /** Sent to the server to prove the current password and receive the wrapped data key. */
+  readonly currentLoginKey: string;
+  /** Opens the wrapped data key with the current password and re-wraps it under the new one. */
+  rewrap(wrappedDataKey: string): Promise<{ server: PasswordSetup; dataKey: DataKey }>;
+}
+
+class PasswordChangeHandle implements PasswordChange {
+  #pending: { kek: CryptoKey; email: string; newPassword: string } | null;
+
+  constructor(
+    readonly currentLoginKey: string,
+    pending: { kek: CryptoKey; email: string; newPassword: string },
+  ) {
+    this.#pending = pending;
+  }
+
+  async rewrap(wrappedDataKey: string): Promise<{ server: PasswordSetup; dataKey: DataKey }> {
+    const pending = this.#pending;
+    if (pending === null) throw credentialsUsed();
+    this.#pending = null;
+    // The extractable copy only lives inside this function, to be re-wrapped.
+    const extractable = await unwrap(pending.kek, wrappedDataKey, WRAP_CONTEXT.password, true);
+    const { setup, dataKey } = await setUpPassword(pending.email, pending.newPassword, extractable);
+    return { server: setup, dataKey };
+  }
+}
+
 /**
- * Password change: proves the current password by deriving its keys and opening the data key,
- * then re-wraps the data key under the new password with a new salt and the default
+ * Password change, first step: derives the current password's keys so the client can prove it
+ * to the server with `currentLoginKey`, which is the only way to receive the wrapped data key.
+ * `rewrap` then opens it and re-wraps it under the new password with a new salt and the default
  * parameters. It takes the current password rather than login credentials, so nothing left
  * alive after a login can re-wrap the data key under a password of someone else's choosing.
- * The server authorises the change with `currentLoginKey`. The recovery code keeps working.
+ * The recovery code keeps working.
  */
-export async function changePassword({
+export async function beginPasswordChange({
   email,
   currentPassword,
   newPassword,
   salt,
   kdf,
+}: {
+  email: string;
+  currentPassword: string;
+  newPassword: string;
+  salt: string;
+  kdf: unknown;
+}): Promise<PasswordChange> {
+  assertNewPassword(newPassword);
+  assertKdfParams(kdf);
+  const current = await derivePasswordKeys(email, currentPassword, decodeSalt(salt), kdf);
+  return new PasswordChangeHandle(current.sentKey, { kek: current.kek, email, newPassword });
+}
+
+/** Password change in one call, for a wrapped data key already at hand. */
+export async function changePassword({
   wrappedDataKey,
+  ...input
 }: {
   email: string;
   currentPassword: string;
@@ -288,12 +323,8 @@ export async function changePassword({
   kdf: unknown;
   wrappedDataKey: string;
 }): Promise<{ currentLoginKey: string; server: PasswordSetup; dataKey: DataKey }> {
-  assertNewPassword(newPassword);
-  assertKdfParams(kdf);
-  const current = await derivePasswordKeys(email, currentPassword, decodeSalt(salt), kdf);
-  const extractableDataKey = await unwrap(current.kek, wrappedDataKey, WRAP_CONTEXT.password, true);
-  const { setup, dataKey } = await setUpPassword(email, newPassword, extractableDataKey);
-  return { currentLoginKey: current.sentKey, server: setup, dataKey };
+  const change = await beginPasswordChange(input);
+  return { currentLoginKey: change.currentLoginKey, ...(await change.rewrap(wrappedDataKey)) };
 }
 
 /** First step of a recovery: parses the code and derives the auth key to send. */

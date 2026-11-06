@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   type AccountKeys,
+  beginPasswordChange,
   changePassword,
   createAccountKeys,
   derivePasswordCredentials,
@@ -388,6 +389,82 @@ describe('changePassword', () => {
       own: Object.keys(handle),
       methods: Object.getOwnPropertyNames(Object.getPrototypeOf(handle)).sort(),
     }).toEqual({ own: ['loginKey'], methods: ['constructor', 'unlockDataKey'] });
+  });
+});
+
+describe('beginPasswordChange', () => {
+  function begin(
+    account: AccountKeys,
+    overrides: { currentPassword?: string; newPassword?: string } = {},
+  ) {
+    return beginPasswordChange({
+      email: EMAIL,
+      currentPassword: PASSWORD,
+      newPassword: NEW_PASSWORD,
+      salt: account.server.salt,
+      kdf: account.server.kdf,
+      ...overrides,
+    });
+  }
+
+  it('should give the current login key before the wrapped data key is known', async () => {
+    const { account } = await registerWithData();
+
+    const change = await begin(account);
+
+    expect(change.currentLoginKey).toBe(account.server.loginKey);
+  });
+
+  it('should re-wrap the data key under the new password once it arrives', async () => {
+    const { account, blob } = await registerWithData();
+    const change = await begin(account);
+
+    const { server, dataKey } = await change.rewrap(account.server.wrappedDataKey);
+    const next = await login(NEW_PASSWORD, server);
+    const reopened = await next.unlockDataKey(server.wrappedDataKey);
+
+    expect({
+      returned: await decryptRecord(dataKey, RECORD_ID, blob),
+      reopened: await decryptRecord(reopened.dataKey, RECORD_ID, blob),
+    }).toEqual({ returned: plaintext, reopened: plaintext });
+  });
+
+  it('should check the new password before anything is sent', async () => {
+    const { account } = await registerWithData();
+
+    await expect(begin(account, { newPassword: 'too short' })).rejects.toMatchObject({
+      code: 'PASSWORD_TOO_SHORT',
+    });
+  });
+
+  it('should fail to re-wrap with a wrong current password', async () => {
+    const { account } = await registerWithData();
+    const change = await begin(account, { currentPassword: 'wrong password' });
+
+    await expect(change.rewrap(account.server.wrappedDataKey)).rejects.toMatchObject({
+      code: 'DECRYPTION_FAILED',
+    });
+  });
+
+  it('should re-wrap only once', async () => {
+    const { account } = await registerWithData();
+    const change = await begin(account);
+    await change.rewrap(account.server.wrappedDataKey);
+
+    await expect(change.rewrap(account.server.wrappedDataKey)).rejects.toMatchObject({
+      code: 'CREDENTIALS_USED',
+    });
+  });
+
+  it('should expose nothing but the current login key', async () => {
+    const { account } = await registerWithData();
+
+    const change = await begin(account);
+
+    expect({
+      own: Object.keys(change),
+      methods: Object.getOwnPropertyNames(Object.getPrototypeOf(change)).sort(),
+    }).toEqual({ own: ['currentLoginKey'], methods: ['constructor', 'rewrap'] });
   });
 });
 

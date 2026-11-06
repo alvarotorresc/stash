@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import { requireSession, resolveSession, type Session } from '../src/auth/session';
-import { allowAll } from '../src/rate-limit';
+import { env } from 'cloudflare:workers';
+import { createSessionResolver, requireSession, type Session } from '../src/auth/session';
+import { register } from './helpers';
 
 const request = () =>
   new Request('https://stash.test/api/private', { headers: { Authorization: 'Bearer anything' } });
@@ -46,14 +47,21 @@ describe('requireSession', () => {
   });
 });
 
-describe('resolveSession', () => {
-  it('should fail closed until sessions exist', async () => {
-    expect(await resolveSession(request())).toBeNull();
-  });
-});
+describe('createSessionResolver', () => {
+  it('should resolve a bearer token from the account routes to its account', async () => {
+    const { token } = await register();
+    const userId = (await env.DB.prepare('SELECT id FROM users').first<{ id: string }>())?.id;
 
-describe('allowAll', () => {
-  it('should let every request through', async () => {
-    expect(await allowAll.limit({ key: 'account-1' })).toEqual({ success: true });
+    const session = await createSessionResolver(env)(
+      new Request('https://stash.test/api/private', {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+    );
+
+    expect(session).toEqual({ accountId: userId });
+  });
+
+  it('should resolve an unknown token to no session', async () => {
+    expect(await createSessionResolver(env)(request())).toBeNull();
   });
 });

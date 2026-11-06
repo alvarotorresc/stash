@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "build": "wrangler build",
-    "typecheck": "tsc",
+    "typecheck": "tsc && tsc -p test/e2e",
     "test": "vitest run --coverage"
   },
   "dependencies": {
