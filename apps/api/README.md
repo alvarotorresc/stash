@@ -214,6 +214,27 @@ compacting tombstones that every device has already pulled.
 **Limit that remains:** the Workers Free plan also caps requests at 100 000 a day. An attacker
 can still spend that quota; only the WAF rule keeps abuse from reaching the Worker.
 
+### Queries per invocation
+
+The Workers Free plan allows 50 D1 queries per Worker invocation, and 50 subrequests, which D1
+queries and outbound fetches share. A `db.batch()` counts as one query however many statements it
+holds ([D1 limits](https://developers.cloudflare.com/d1/platform/limits/)), so a push of 100
+operations, written in one batch, costs the same query as a push of one.
+`test/queries-per-invocation.test.ts` counts the queries of each route against a cap of 45:
+
+| Route                                      | D1 queries | Outbound fetches |
+| ------------------------------------------ | ---------- | ---------------- |
+| Register, login, recovery, password proofs | 5          | -                |
+| Password change, account deletion          | 6          | -                |
+| Push (100 operations), pull (500 records)  | 6          | -                |
+| Extraction                                 | 4          | at most 12       |
+| Daily sweep and purge (1 000 records)      | 1          | -                |
+
+A request counts its session (1 query) and its rate limit (a read and up to two batches), then
+reads and writes in batches. Extraction downloads at most two documents (an X post's oEmbed and
+page, or a short link and its target), each with up to five redirects. The purge removes its
+records with one `DELETE … LIMIT`, not one statement per record.
+
 ### Before publishing: WAF rate limiting rule
 
 Configure, in the Cloudflare dashboard of the zone (Security, WAF, Rate limiting rules), the one
