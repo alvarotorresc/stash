@@ -20,7 +20,7 @@ import { generateRecoveryCode, parseRecoveryCode } from './recovery-code';
 export type { PasswordSetup, RecoverySetup } from './setup';
 
 /**
- * Key chain, version 1 (D31):
+ * Key chain, version 1:
  *
  * - password → Argon2id(salt bound to the email) → HKDF → login key (sent) + password KEK
  * - recovery code (128 bits) → HKDF → recovery auth key (sent) + recovery KEK

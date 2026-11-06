@@ -67,7 +67,8 @@ describe('argon2id', () => {
     },
   );
 
-  it('should match the reference with the production parameters', async () => {
+  // The pure JavaScript reference is slow with 64 MiB of memory, especially on CI runners.
+  it('should match the reference with the production parameters', { timeout: 60_000 }, async () => {
     const salt = new Uint8Array(16).fill(0xa5);
     const encoded = new TextEncoder().encode('production parameters');
 

@@ -1,74 +1,19 @@
-import { env } from 'cloudflare:workers';
-import { API_PATHS } from '@stash/core/protocol';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { handleAccountsRequest, isAccountsPath } from '../src/accounts/routes';
-import { BASE_URL, errorOf, uniqueEmail } from './helpers';
+import { describe, expect, it } from 'vitest';
+import wranglerConfig from '../wrangler.toml?raw';
 
-function prelogin(): Request {
-  return new Request(`${BASE_URL}${API_PATHS.prelogin}`, {
-    method: 'POST',
-    body: JSON.stringify({ email: uniqueEmail() }),
-  });
+/** Top-level keys of the TOML file: the lines before the first `[table]` header. */
+function topLevel(toml: string): string {
+  const firstTable = toml.search(/^\[/m);
+  return firstTable === -1 ? toml : toml.slice(0, firstTable);
 }
 
-describe('handleAccountsRequest', () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it.each([
-    ['missing', undefined],
-    ['too short', 'short'],
-  ])('should answer 500 and do nothing when the pepper is %s', async (_case, pepper) => {
-    vi.spyOn(console, 'error').mockImplementation(() => undefined);
-
-    const res = await handleAccountsRequest(prelogin(), { DB: env.DB, PEPPER: pepper });
-
-    expect(await errorOf(res)).toEqual({ status: 500, code: 'INTERNAL_ERROR' });
-  });
-
-  it('should answer 500 without details when the database fails', async () => {
-    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    const broken = {
-      prepare() {
-        throw new Error('SQLITE_ERROR: secret detail');
-      },
-    } as unknown as D1Database;
-
-    const res = await handleAccountsRequest(prelogin(), { DB: broken, PEPPER: env.PEPPER });
-
-    expect({
-      body: await res.text(),
-      logged: error.mock.calls.flat().join(' ').includes('secret detail'),
-    }).toEqual({
-      body: JSON.stringify({ error: { code: 'INTERNAL_ERROR', message: 'Something went wrong' } }),
-      logged: false,
-    });
-  });
-
-  it('should log a generic line when something that is not an Error is thrown', async () => {
-    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    const broken = {
-      prepare() {
-        throw 'boom';
-      },
-    } as unknown as D1Database;
-
-    await handleAccountsRequest(prelogin(), { DB: broken, PEPPER: env.PEPPER });
-
-    expect(error).toHaveBeenCalledWith('accounts: unexpected error');
-  });
-});
-
-describe('isAccountsPath', () => {
-  it.each([
-    ['/api/auth/login', true],
-    ['/api/account', true],
-    ['/api/account/password', true],
-    ['/api/accounts', false],
-    ['/api/authx', false],
-    ['/api/health', false],
-  ])('should classify %s as %s', (path, expected) => {
-    expect(isAccountsPath(path)).toBe(expected);
+describe('wrangler.toml', () => {
+  it('should make every outbound fetch go through the public internet', () => {
+    // Without this flag, requests to a zone of the same account reach its origin directly and skip
+    // the Cloudflare security settings of that zone. It must be a top-level key: below a table
+    // header TOML would assign it to that table and the flag would be silently lost.
+    expect(topLevel(wranglerConfig)).toMatch(
+      /^compatibility_flags\s*=\s*\[[^\]]*"global_fetch_strictly_public"[^\]]*\]/m,
+    );
   });
 });

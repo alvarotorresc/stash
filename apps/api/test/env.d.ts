@@ -9,3 +9,9 @@ declare namespace Cloudflare {
     TEST_MIGRATIONS: import('cloudflare:test').D1Migration[];
   }
 }
+
+/* Vite raw imports, used to read configuration files from the tests. */
+declare module '*?raw' {
+  const content: string;
+  export default content;
+}

@@ -1,6 +1,16 @@
 import { handleAccountsRequest, isAccountsPath } from './accounts/routes';
 import type { AccountsEnv } from './accounts/env';
+import { resolveSession } from './auth/session';
+import { createExtractRoutes, DEFAULT_LIMITS } from './extract/routes';
 import { jsonData, jsonError } from './http';
+import { allowAll } from './rate-limit';
+
+const extractRoutes = createExtractRoutes({
+  fetch: (input, init) => fetch(input, init),
+  resolveSession,
+  rateLimiter: allowAll,
+  limits: DEFAULT_LIMITS,
+});
 
 export default {
   async fetch(request, env): Promise<Response> {
@@ -14,6 +24,9 @@ export default {
     }
 
     if (isAccountsPath(pathname)) return handleAccountsRequest(request, env);
+
+    const extractResponse = await extractRoutes(request, pathname);
+    if (extractResponse) return extractResponse;
 
     return jsonError('NOT_FOUND', 'Not found', 404);
   },

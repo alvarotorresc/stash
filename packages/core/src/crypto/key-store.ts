@@ -74,7 +74,7 @@ function isValid(stored: unknown, now: number): stored is StoredDataKey {
 
 /**
  * Stores the CryptoKey object itself, which IndexedDB keeps as is: a non-extractable key stays
- * non-extractable, so its raw bytes are never exposed to JavaScript (D4, D32). That is a
+ * non-extractable, so its raw bytes are never exposed to JavaScript. That is a
  * property of the JavaScript API, not encryption at rest: the browser keeps the key material
  * in its profile, protected only by the device's own disk encryption.
  */
