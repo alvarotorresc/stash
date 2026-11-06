@@ -23,8 +23,10 @@ function hasBody(doc: Document): boolean {
  *   omits them, which is valid HTML5: its root becomes the first element and `body` is detached),
  *   the HTML is wrapped in `<html><head></head><body>…</body></html>` and parsed again; otherwise
  *   Readability fails. Browsers and jsdom always build both.
- * - A single `<base>` with the page URL is set, so relative links resolve against the page and
- *   not against the app's own origin.
+ * - No `<base>` is ever added: the app's CSP (`base-uri 'none'`) blocks it, and relative links
+ *   would then resolve against the app's origin. Instead the document's `baseURI` is set to the
+ *   page's base URL, which is what Readability resolves links and images against. Links to an
+ *   anchor of the same page (`#id`) come out as absolute URLs of the page.
  */
 export function parseHtmlPage(
   html: string,
@@ -39,10 +41,6 @@ export function parseHtmlPage(
   const bases = Array.from(doc.querySelectorAll('base'));
   const baseUrl = resolveHttpUrl(bases[0]?.getAttribute('href'), url) ?? url;
   for (const base of bases) base.remove();
-  if (doc.head) {
-    const base = doc.createElement('base');
-    base.setAttribute('href', baseUrl);
-    doc.head.prepend(base);
-  }
+  Object.defineProperty(doc, 'baseURI', { value: baseUrl, configurable: true });
   return { doc, baseUrl };
 }
