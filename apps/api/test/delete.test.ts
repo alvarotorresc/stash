@@ -57,7 +57,7 @@ describe('DELETE /api/account', () => {
       .bind(...counters)
       .first<{ n: number }>();
 
-    expect({ tracked: counters.length, left: left?.n }).toEqual({ tracked: 2, left: 0 });
+    expect({ tracked: counters.length, left: left?.n }).toEqual({ tracked: 3, left: 0 });
   });
 
   it('should free the email for a new registration', async () => {

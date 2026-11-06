@@ -42,6 +42,8 @@ export const LIMITS = {
    * so a burst of new accounts cannot starve every other route.
    */
   extract: { global: { max: 30_000, windowMs: DAY }, account: { max: 60, windowMs: 10 * MINUTE } },
+  /** Record sync (pulls and pushes), per account. A first load of a full account fits easily. */
+  records: { account: { max: 300, windowMs: 10 * MINUTE } },
 } as const satisfies Record<string, Partial<Record<Bucket, Limit>>>;
 
 export type Action = keyof typeof LIMITS;

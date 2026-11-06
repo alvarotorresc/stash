@@ -39,6 +39,8 @@ export function kdfOf(row: Pick<UserRow, 'kdf_memory_kib' | 'kdf_iterations'>): 
  * account removes everything in one batch, which D1 runs as a single transaction.
  */
 export const DELETE_ACCOUNT_STATEMENTS = [
+  'DELETE FROM records WHERE user_id = ?1',
+  'DELETE FROM record_counts WHERE user_id = ?1',
   'DELETE FROM sessions WHERE user_id = ?1',
   'DELETE FROM users WHERE id = ?1',
 ] as const;
