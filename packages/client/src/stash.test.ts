@@ -315,6 +315,24 @@ describe('createStash', () => {
       });
     });
 
+    it('should return the existing item for a link already saved, without reading it again', async () => {
+      const { backend, phone } = await registered();
+      articleAt(backend, URL_A, 'La despensa');
+      const first = await phone.stash.save(URL_A);
+      await phone.stash.idle();
+      const reads = backend.extracted.length;
+
+      const again = await phone.stash.save(`${URL_A}#otra-parte`);
+      await phone.stash.idle();
+
+      expect({
+        id: again.id,
+        alreadySaved: again.alreadySaved,
+        reads: backend.extracted.length - reads,
+        listed: phone.stash.sync.listItems().length,
+      }).toEqual({ id: first.id, alreadySaved: true, reads: 0, listed: 1 });
+    });
+
     it('should queue a save without connection and read it once back online', async () => {
       const { backend, phone } = await registered();
       articleAt(backend, URL_A, 'La despensa');
