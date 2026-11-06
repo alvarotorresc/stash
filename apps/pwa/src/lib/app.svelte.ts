@@ -8,6 +8,8 @@ import type { Category, Item, Session, StashService, Status, TagInfo, Undo } fro
 export interface SheetState {
   variant: 'saved' | 'queued' | 'classify';
   itemId: string;
+  /** The shared link was already saved. */
+  duplicate?: boolean;
 }
 
 interface UndoAction {
@@ -124,7 +126,11 @@ export class AppState {
     }
     try {
       const item = await this.service.save(url);
-      this.openSheet({ variant: item.queued ? 'queued' : 'saved', itemId: item.id });
+      this.openSheet({
+        variant: item.queued ? 'queued' : 'saved',
+        itemId: item.id,
+        duplicate: item.alreadySaved,
+      });
     } catch {
       this.failure = 'No se ha podido guardar el enlace. Vuelve a compartirlo en un momento.';
     }

@@ -183,7 +183,8 @@ export function createRealService(stash: Stash): StashService {
 
     async save(url) {
       try {
-        return item(await stash.save(url));
+        const saved = await stash.save(url);
+        return { ...item(saved), alreadySaved: saved.alreadySaved };
       } catch (failure) {
         throw changeError(failure);
       }

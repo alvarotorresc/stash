@@ -22,8 +22,13 @@ describe('mock service', () => {
     const service = createMockService({ online: true });
 
     const first = await service.save('https://lacocinaordenada.es/organizar-la-despensa');
+    const fresh = await service.save('https://example.com/nuevo');
 
-    expect(first.id).toBe('item-despensa');
+    expect({ id: first.id, already: first.alreadySaved, fresh: fresh.alreadySaved }).toEqual({
+      id: 'item-despensa',
+      already: true,
+      fresh: false,
+    });
   });
 
   it('should reject changes offline and keep search and reads working', async () => {
