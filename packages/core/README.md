@@ -165,6 +165,7 @@ only encrypted blobs with their id, kind and version.
 | --------------------------------- | ----------------------------------------------------------------------------------------------- |
 | No connection, reading            | `open()` loads the cache; lists and search work as usual.                                       |
 | No connection, saving a new link  | It goes to the encrypted queue and shows with `queued: true`. `sync()` uploads it once.         |
+| Server failing, saving a new link | Queued as well on a 5xx, a rate limit, a bad answer or a closed session: a save is never lost.  |
 | No connection, any other change   | Fails with `SyncError` code `OFFLINE`; nothing is queued.                                       |
 | Two devices change the same thing | The server keeps the last write it receives; every device ends up with it on its next `sync()`. |
 

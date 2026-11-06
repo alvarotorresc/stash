@@ -12,7 +12,7 @@ import type { DataKey } from '../crypto/records';
 import { isPriority, type Priority } from '../priority';
 import { createIndexedDbRecordCache, type CachedRecord, type RecordCache } from './cache';
 import { fitItem, openRecord, sealRecord } from './codec';
-import { SyncError } from './errors';
+import { SyncError, type SyncErrorCode } from './errors';
 import {
   categoryName,
   detectSource,
@@ -114,7 +114,10 @@ export interface SyncClient {
   listItems(): ItemView[];
   getItem(id: string): ItemView | null;
   search(filters?: ItemFilters): SearchResult[];
-  /** Saves a link. Offline, or if the upload fails for lack of connection, it is queued. */
+  /**
+   * Saves a link. Offline, or if the upload fails for lack of connection or a passing server
+   * failure, it is queued: a save is never lost.
+   */
   saveLink(input: SaveLinkInput): Promise<ItemView>;
   /** Stores what reading the link produced (preview, content, thumbnail). */
   setReadResult(id: string, result: ReadResult): Promise<void>;
@@ -201,8 +204,22 @@ function offline(): SyncError {
   return new SyncError('OFFLINE', 'This change needs a connection');
 }
 
-function isOffline(error: unknown): boolean {
-  return error instanceof SyncError && error.code === 'OFFLINE';
+/**
+ * Failures after which a new save waits in the queue instead of being lost: no connection, or a
+ * server that may accept it later (overloaded, rate limited, answering garbage, or a session that
+ * was closed elsewhere and comes back with the next login). A save the server refuses for good
+ * (quota, size, input) is not queued: retrying it would only fail again.
+ */
+const QUEUE_ON: ReadonlySet<SyncErrorCode> = new Set<SyncErrorCode>([
+  'OFFLINE',
+  'SERVER_ERROR',
+  'RATE_LIMITED',
+  'BAD_RESPONSE',
+  'UNAUTHORIZED',
+]);
+
+function canQueueAfter(error: unknown): boolean {
+  return error instanceof SyncError && QUEUE_ON.has(error.code);
 }
 
 function defaultIsOnline(): boolean {
@@ -640,7 +657,7 @@ export function createSyncClient(options: SyncClientOptions): SyncClient {
         try {
           await commit(records.map((record) => ({ op: 'create', record })));
         } catch (error) {
-          if (!isOffline(error)) throw error;
+          if (!canQueueAfter(error)) throw error;
           queued = true;
         }
       }
