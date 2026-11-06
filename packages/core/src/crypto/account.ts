@@ -14,7 +14,10 @@ import {
 import { INFO, splitKeyMaterial, type SplitKeys } from './key-chain';
 import { assertNewPassword } from './password-policy';
 import type { DataKey } from './records';
+import type { PasswordSetup, RecoverySetup } from './setup';
 import { generateRecoveryCode, parseRecoveryCode } from './recovery-code';
+
+export type { PasswordSetup, RecoverySetup } from './setup';
 
 /**
  * Key chain, version 1 (D31):
@@ -30,20 +33,6 @@ const WRAP_CONTEXT = {
   password: 'data-key:password',
   recovery: 'data-key:recovery',
 } as const;
-
-/** What the server stores for the password. */
-export interface PasswordSetup {
-  readonly salt: string;
-  readonly kdf: KdfParams;
-  readonly loginKey: string;
-  readonly wrappedDataKey: string;
-}
-
-/** What the server stores for the recovery code. */
-export interface RecoverySetup {
-  readonly recoveryAuthKey: string;
-  readonly recoveryWrappedDataKey: string;
-}
 
 export interface AccountKeys {
   /** Sent to the server. Keys are base64url; the server stores only their hashes. */
