@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   extractSharedUrl,
   handleShareRequest,
+  isShareRequest,
   readSharedParam,
   shareRedirect,
   toHttpUrl,
@@ -34,6 +35,13 @@ describe('extractSharedUrl', () => {
     expect(
       extractSharedUrl({ text: 'https://uno.example/a y también https://dos.example/b' }),
     ).toBe('https://uno.example/a');
+  });
+
+  it('should keep a closing parenthesis that belongs to the link', () => {
+    expect(
+      extractSharedUrl({ text: 'Mira (https://es.wikipedia.org/wiki/Calabaza_(fruto)).' }),
+    ).toBe('https://es.wikipedia.org/wiki/Calabaza_(fruto)');
+    expect(extractSharedUrl({ text: '(ver https://ok.example/p)' })).toBe('https://ok.example/p');
   });
 
   it('should reject links that are not http or https', () => {
@@ -89,6 +97,17 @@ describe('handleShareRequest', () => {
     );
 
     expect(response.headers.get('Location')).toBe(`${ORIGIN}/`);
+  });
+});
+
+describe('isShareRequest', () => {
+  it('should match only a POST to the share path of this origin', () => {
+    expect(isShareRequest(new Request(`${ORIGIN}/share`, { method: 'POST' }), ORIGIN)).toBe(true);
+    expect(isShareRequest(new Request(`${ORIGIN}/share`), ORIGIN)).toBe(false);
+    expect(isShareRequest(new Request(`${ORIGIN}/other`, { method: 'POST' }), ORIGIN)).toBe(false);
+    expect(
+      isShareRequest(new Request('https://evil.example/share', { method: 'POST' }), ORIGIN),
+    ).toBe(false);
   });
 });
 

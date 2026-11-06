@@ -12,7 +12,17 @@ export const SHARE_PARAM = 'share';
 const MAX_LENGTH = 2048;
 const URL_IN_TEXT = /https?:\/\/[^\s<>"']+/i;
 /** Punctuation that closes a sentence after a link, not part of it. */
-const TRAILING = /[.,;:!?)\]}»”’]+$/;
+const TRAILING = /[.,;:!?\]}»”’]+$/;
+
+/** Strips sentence punctuation and any ")" the link itself did not open. */
+function trimTrailing(link: string): string {
+  let result = link.replace(TRAILING, '');
+  const count = (char: string) => result.split(char).length - 1;
+  while (result.endsWith(')') && count(')') > count('(')) {
+    result = result.slice(0, -1).replace(TRAILING, '');
+  }
+  return result;
+}
 
 /** The value as an http(s) URL, or null. */
 export function toHttpUrl(value: string | null | undefined): string | null {
@@ -31,12 +41,16 @@ export function toHttpUrl(value: string | null | undefined): string | null {
 /**
  * The shared link: the url field when it is valid, otherwise the first
  * http(s) link inside text (many apps send "Look at this https://…").
+ *
+ * When text carries several links only the first is kept: apps put the
+ * shared item first and append their own links (profile, download) after.
+ * Stash saves one item per share, so it never guesses among the rest.
  */
 export function extractSharedUrl(fields: { url?: string | null; text?: string | null }) {
   const direct = toHttpUrl(fields.url);
   if (direct) return direct;
   const match = URL_IN_TEXT.exec(fields.text ?? '');
-  return match ? toHttpUrl(match[0].replace(TRAILING, '')) : null;
+  return match ? toHttpUrl(trimTrailing(match[0])) : null;
 }
 
 const asString = (value: FormDataEntryValue | null) => (typeof value === 'string' ? value : null);
@@ -48,7 +62,17 @@ export function shareRedirect(url: string | null, origin: string): string {
   return target.href;
 }
 
-/** POST from the share sheet to a 303 into the app. */
+/** Whether the service worker must answer this request as a share. */
+export function isShareRequest(request: Request, origin: string): boolean {
+  const url = new URL(request.url);
+  return request.method === 'POST' && url.origin === origin && url.pathname === SHARE_PATH;
+}
+
+/**
+ * POST from the share sheet to a 303 into the app. The redirect always goes
+ * to this origin's start page: the shared value only travels as a query
+ * parameter, never as the target, so it cannot become an open redirect.
+ */
 export async function handleShareRequest(request: Request, origin: string): Promise<Response> {
   let url: string | null;
   try {
