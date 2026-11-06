@@ -16,8 +16,16 @@ export default defineConfig({
         start_url: '/',
         scope: '/',
         display: 'standalone',
-        background_color: '#ffffff',
-        theme_color: '#ffffff',
+        lang: 'es',
+        background_color: '#eef0ea',
+        theme_color: '#eef0ea',
+        // Android share sheet: the service worker answers this POST (src/share.ts).
+        share_target: {
+          action: '/share',
+          method: 'POST',
+          enctype: 'multipart/form-data',
+          params: { title: 'title', text: 'text', url: 'url' },
+        },
       },
     }),
   ],
