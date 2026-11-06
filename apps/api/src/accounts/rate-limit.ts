@@ -3,7 +3,7 @@ import type { RateLimiter } from '../rate-limit';
 import { ApiError } from './errors';
 import { hmac } from './hashing';
 
-/** At most `max` requests per `windowMs`, in fixed windows. */
+/** At most `max` requests (or units of cost) per `windowMs`, in fixed windows. */
 export interface Limit {
   readonly max: number;
   readonly windowMs: number;
@@ -98,18 +98,21 @@ interface Counter {
   readonly bucket: Bucket;
   readonly key: string;
   readonly limit: Limit;
+  /** What one request adds to the bucket: its cost, or 1 for a failure bucket. */
+  readonly cost: number;
 }
 
 /**
- * Counts one request in a bucket, unless the bucket is full: then it writes nothing and returns
- * no row. A window that has passed starts again at 1.
+ * Adds a request's cost (?5) to a bucket, unless that would take it over its max: then it writes
+ * nothing and returns no row. A window that has passed starts again at the cost. A cost over the
+ * max is refused before any write, also for a new key or a passed window, by the `SELECT`.
  */
 const HIT = `
-INSERT INTO rate_limits (key, window_start, count) VALUES (?1, ?2, 1)
+INSERT INTO rate_limits (key, window_start, count) SELECT ?1, ?2, ?5 WHERE ?5 <= ?4
 ON CONFLICT (key) DO UPDATE SET
-  count = CASE WHEN rate_limits.window_start <= ?2 - ?3 THEN 1 ELSE rate_limits.count + 1 END,
+  count = CASE WHEN rate_limits.window_start <= ?2 - ?3 THEN ?5 ELSE rate_limits.count + ?5 END,
   window_start = CASE WHEN rate_limits.window_start <= ?2 - ?3 THEN ?2 ELSE rate_limits.window_start END
-WHERE rate_limits.window_start <= ?2 - ?3 OR rate_limits.count < ?4
+WHERE rate_limits.window_start <= ?2 - ?3 OR rate_limits.count + ?5 <= ?4
 RETURNING count`;
 
 function subjectOf(bucket: Bucket, { ip, email, account }: Subjects): string | undefined {
@@ -127,27 +130,44 @@ function subjectOf(bucket: Bucket, { ip, email, account }: Subjects): string | u
   }
 }
 
-/** The counters of a request, most specific first, with the shared budget last. */
-async function countersOf(pepper: string, action: Action, subjects: Subjects): Promise<Counter[]> {
+/**
+ * The counters of a request, most specific first, with the shared budget last. Counted buckets
+ * take the request's cost; failure buckets count one failure at a time.
+ */
+async function countersOf(
+  pepper: string,
+  action: Action,
+  subjects: Subjects,
+  cost = 1,
+): Promise<Counter[]> {
   const limits: Partial<Record<Bucket, Limit>> = LIMITS[action];
   const counters: Counter[] = [];
   for (const bucket of ORDER) {
     const limit = limits[bucket];
     const subject = subjectOf(bucket, subjects);
     if (limit === undefined || subject === undefined) continue;
-    counters.push({ bucket, limit, key: await counterKey(pepper, action, bucket, subject) });
+    counters.push({
+      bucket,
+      limit,
+      key: await counterKey(pepper, action, bucket, subject),
+      cost: FAILURES_ONLY.has(bucket) ? 1 : cost,
+    });
   }
   if (BUDGETED_ACTIONS.has(action)) {
     counters.push({
       bucket: 'global',
       limit: AUTH_BUDGET,
       key: await counterKey(pepper, 'auth', 'global', ''),
+      cost,
     });
   }
   return counters;
 }
 
-/** How long until every full counter has room again, 0 when none is full. Reads only. */
+/**
+ * How long until every counter has room for its cost again, 0 when all have. A cost over a
+ * bucket's max never fits: it waits a whole window. Reads only.
+ */
 async function waitFor(db: D1Database, counters: Counter[], now: number): Promise<number> {
   const { results } = await db
     .prepare(
@@ -156,28 +176,34 @@ async function waitFor(db: D1Database, counters: Counter[], now: number): Promis
     .bind(...counters.map(({ key }) => key))
     .all<{ key: string; window_start: number; count: number }>();
   let wait = 0;
+  for (const { limit, cost } of counters) {
+    if (cost > limit.max) wait = Math.max(wait, limit.windowMs);
+  }
   for (const row of results) {
-    const { limit } = counters.find(({ key }) => key === row.key) as Counter;
+    const { limit, cost } = counters.find(({ key }) => key === row.key) as Counter;
     const endsAt = row.window_start + limit.windowMs;
-    if (endsAt > now && row.count >= limit.max) wait = Math.max(wait, endsAt - now);
+    if (endsAt > now && row.count + cost > limit.max) wait = Math.max(wait, endsAt - now);
   }
   return wait;
 }
 
-/** Counts in each counter; returns those that were full and wrote nothing. */
+/** Adds each counter's cost; returns the counters that had no room and wrote nothing. */
 async function hit(db: D1Database, counters: Counter[], now: number): Promise<Counter[]> {
   if (counters.length === 0) return [];
   const results = await db.batch<{ count: number }>(
-    counters.map(({ key, limit }) => db.prepare(HIT).bind(key, now, limit.windowMs, limit.max)),
+    counters.map(({ key, limit, cost }) =>
+      db.prepare(HIT).bind(key, now, limit.windowMs, limit.max, cost),
+    ),
   );
   return counters.filter((_, index) => results[index]?.results.length === 0);
 }
 
 /**
  * Counts the request and returns how long to wait when a bucket is full, or 0 when it may go
- * ahead. A refused request writes no row:
+ * ahead. A request has a cost, 1 by default: it adds that much to each bucket and is refused
+ * when any bucket would go over its max. A refused request writes no row:
  *
- * 1. Every bucket, failure buckets included, is read; any full one refuses the request.
+ * 1. Every bucket, failure buckets included, is read; any without room refuses the request.
  * 2. The specific buckets (IP, account) are counted with a conditional upsert.
  * 3. Only if all of them had room, the global bucket and the shared budget are counted.
  *
@@ -190,8 +216,12 @@ export async function countRequest(
   action: Action,
   subjects: Subjects,
   now = Date.now(),
+  cost = 1,
 ): Promise<number> {
-  const counters = await countersOf(pepper, action, subjects);
+  if (!Number.isSafeInteger(cost) || cost < 1) {
+    throw new RangeError('The cost of a request must be a positive integer');
+  }
+  const counters = await countersOf(pepper, action, subjects, cost);
   const wait = await waitFor(db, counters, now);
   if (wait > 0) return wait;
 
@@ -231,8 +261,9 @@ export async function enforceRateLimit(
   action: Action,
   subjects: Subjects,
   now = Date.now(),
+  cost = 1,
 ): Promise<void> {
-  const retryAfterMs = await countRequest(db, pepper, action, subjects, now);
+  const retryAfterMs = await countRequest(db, pepper, action, subjects, now, cost);
   if (retryAfterMs > 0) {
     throw new ApiError('RATE_LIMITED', 'Too many requests, try again later', 429, {
       'Retry-After': String(Math.ceil(retryAfterMs / 1000)),

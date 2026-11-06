@@ -405,3 +405,98 @@ describe('createExtractRateLimiter', () => {
     expect(await countOf(await globalKey('extract'))).toBe(LIMITS.extract.account.max);
   });
 });
+
+describe('weighted requests', () => {
+  const account = 'weighted-account';
+  const { max } = LIMITS.recordsPush.account;
+
+  async function accountKey(action: string, subject: string): Promise<string> {
+    return toBase64Url(
+      await hmac(env.PEPPER, 'rate-limit', `${action}\u0000account\u0000${subject}`),
+    );
+  }
+
+  function weighted(db: D1Database, cost: number): Promise<number> {
+    return countRequest(db, env.PEPPER, 'recordsPush', { account }, Date.now(), cost);
+  }
+
+  it('should count the cost in every bucket and accept it up to the max exactly', async () => {
+    const first = await weighted(env.DB, max - 10);
+    const second = await weighted(env.DB, 10);
+
+    expect({
+      first,
+      second,
+      account: await countOf(await accountKey('recordsPush', account)),
+      global: await countOf(await globalKey('recordsPush')),
+    }).toEqual({ first: 0, second: 0, account: max, global: max });
+  });
+
+  it('should refuse a cost over the room left and write nothing', async () => {
+    await weighted(env.DB, max - 10);
+    const metered = meteredDb(env.DB);
+
+    const wait = await weighted(metered.db, 11);
+
+    expect({
+      refused: wait > 0,
+      written: metered.written(),
+      account: await countOf(await accountKey('recordsPush', account)),
+      global: await countOf(await globalKey('recordsPush')),
+    }).toEqual({ refused: true, written: 0, account: max - 10, global: max - 10 });
+  });
+
+  it('should refuse a cost above the max on an empty bucket and write nothing', async () => {
+    const metered = meteredDb(env.DB);
+
+    const wait = await weighted(metered.db, max + 1);
+
+    expect({ refused: wait > 0, written: metered.written() }).toEqual({
+      refused: true,
+      written: 0,
+    });
+  });
+
+  it('should refuse a cost above the max once the window has passed and write nothing', async () => {
+    const past = Date.now() - 2 * LIMITS.recordsPush.account.windowMs;
+    await countRequest(env.DB, env.PEPPER, 'recordsPush', { account }, past, 5);
+    const metered = meteredDb(env.DB);
+
+    const wait = await weighted(metered.db, max + 1);
+
+    expect({ refused: wait > 0, written: metered.written() }).toEqual({
+      refused: true,
+      written: 0,
+    });
+  });
+
+  it.each([0, -1, 1.5, Number.NaN])('should reject a cost of %s', async (cost) => {
+    await expect(weighted(env.DB, cost)).rejects.toThrow(RangeError);
+  });
+
+  it('should not count the global bucket when the account bucket filled after the check', async () => {
+    // A stale read stands in for a concurrent push that filled the account bucket meanwhile.
+    await weighted(env.DB, max - 5);
+    const globalBefore = await countOf(await globalKey('recordsPush'));
+    const stale = new Proxy(env.DB, {
+      get(target, property) {
+        if (property === 'prepare') {
+          return (sql: string) =>
+            sql.startsWith('SELECT')
+              ? { bind: () => ({ all: async () => ({ results: [] }) }) }
+              : target.prepare(sql);
+        }
+        const value: unknown = Reflect.get(target, property, target);
+        return typeof value === 'function' ? (value as () => unknown).bind(target) : value;
+      },
+    });
+
+    const wait = await weighted(stale, 10);
+
+    expect({
+      refused: wait > 0,
+      account: await countOf(await accountKey('recordsPush', account)),
+      global: await countOf(await globalKey('recordsPush')),
+    }).toEqual({ refused: true, account: max - 5, global: globalBefore });
+  });
+});
