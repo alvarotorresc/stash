@@ -5,4 +5,4 @@ export { minimalResult } from './result';
 export { parseDocument, parsePage } from './page';
 export { parseRedditRss } from './reddit';
 export { parseXOembed } from './x';
-export { IMAGE_SOURCE_ATTRIBUTE, sanitizeHtml } from './sanitize';
+export { IMAGE_SOURCE_ATTRIBUTE, sanitizeHtml, sanitizeStoredHtml } from './sanitize';

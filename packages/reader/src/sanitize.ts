@@ -72,17 +72,35 @@ const ALLOWED_ATTR = [
 
 const MAILTO = /^mailto:/i;
 
+interface Mode {
+  /** Base URL for relative links and images; none for stored HTML, which is already absolute. */
+  baseUrl: string | undefined;
+  /** Stored HTML: keeps a valid `data-stash-src` on images instead of reading `src`. */
+  stored: boolean;
+}
+
 let purifier: Purifier | null = null;
-let currentBaseUrl = '';
+let mode: Mode = { baseUrl: undefined, stored: false };
 
 function getPurifier(): Purifier {
   if (purifier) return purifier;
   const instance = DOMPurify(window);
+  instance.addHook('uponSanitizeAttribute', (node, data) => {
+    // `forceKeepAttr` skips DOMPurify's own checks, so the URL is fully validated here first.
+    if (
+      mode.stored &&
+      node.nodeName === 'IMG' &&
+      data.attrName === IMAGE_SOURCE_ATTRIBUTE &&
+      resolvePublicHttpUrl(data.attrValue)
+    ) {
+      data.forceKeepAttr = true;
+    }
+  });
   instance.addHook('afterSanitizeAttributes', (node) => {
     if (node.nodeName === 'A') {
       const href = node.getAttribute('href');
       const safe =
-        href && MAILTO.test(href.trim()) ? href.trim() : resolveHttpUrl(href, currentBaseUrl);
+        href && MAILTO.test(href.trim()) ? href.trim() : resolveHttpUrl(href, mode.baseUrl);
       if (safe) {
         node.setAttribute('href', safe);
         node.setAttribute('target', '_blank');
@@ -91,9 +109,12 @@ function getPurifier(): Purifier {
         node.removeAttribute('href');
       }
     } else if (node.nodeName === 'IMG') {
-      const src = resolvePublicHttpUrl(node.getAttribute('src'), currentBaseUrl);
+      const image = mode.stored
+        ? resolvePublicHttpUrl(node.getAttribute(IMAGE_SOURCE_ATTRIBUTE))
+        : resolvePublicHttpUrl(node.getAttribute('src'), mode.baseUrl);
       node.removeAttribute('src');
-      if (src) node.setAttribute(IMAGE_SOURCE_ATTRIBUTE, src);
+      if (image) node.setAttribute(IMAGE_SOURCE_ATTRIBUTE, image);
+      else node.removeAttribute(IMAGE_SOURCE_ATTRIBUTE);
     }
   });
   purifier = instance;
@@ -110,6 +131,16 @@ const CONFIG: Config = {
   WHOLE_DOCUMENT: false,
 };
 
+function run(html: string, next: Mode): string {
+  const instance = getPurifier();
+  mode = next;
+  try {
+    return instance.sanitize(html, CONFIG);
+  } finally {
+    mode = { baseUrl: undefined, stored: false };
+  }
+}
+
 /**
  * Sanitizes untrusted HTML before it is rendered in the app.
  *
@@ -123,15 +154,25 @@ const CONFIG: Config = {
  * - Images never load: `src` is removed and the resolved http(s) URL moves to `data-stash-src`, so
  *   the app can fetch it through the proxy if it wants. No request reaches a third party. URLs on
  *   `localhost` or on a non-public literal IP are dropped.
+ *
+ * May throw if the engine runs out of stack on absurdly deep markup; the parsers catch it.
  */
 export function sanitizeHtml(html: string, baseUrl: string): string {
-  const instance = getPurifier();
-  currentBaseUrl = baseUrl;
-  try {
-    return instance.sanitize(html, CONFIG);
-  } finally {
-    currentBaseUrl = '';
-  }
+  return run(html, { baseUrl, stored: false });
+}
+
+/**
+ * Sanitizes HTML that was stored (`content.html`) right before it is rendered. The UI must call
+ * it every time, just before `{@html}`, whatever the HTML comes from: a fresh extraction, the
+ * local cache, sync, or a message from a content script. A fix to the policy then also covers
+ * everything saved before it.
+ *
+ * Same allow-list as `sanitizeHtml`, plus `data-stash-src` kept only on `<img>` and only with an
+ * absolute public http(s) URL. Links must already be absolute http(s) or `mailto:`. It is
+ * idempotent, and leaves the output of `sanitizeHtml` unchanged.
+ */
+export function sanitizeStoredHtml(html: string): string {
+  return run(html, { baseUrl: undefined, stored: true });
 }
 
 const BLOCK_TAGS = new Set([
