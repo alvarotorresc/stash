@@ -7,5 +7,8 @@ export default defineConfig({
   manifest: {
     name: 'Stash',
     description: 'One ordered drawer for everything you save for later.',
+    // contextMenus: "Guardar en Stash" on links. activeTab: read the open tab only when
+    // the popup is opened. No host permissions.
+    permissions: ['contextMenus', 'activeTab'],
   },
 });
