@@ -10,6 +10,7 @@ import {
   type KdfParams,
   type PasswordSetup,
 } from '@stash/core/protocol';
+import { readBounded } from '../extract/safe-fetch';
 import { ApiError, validationError } from './errors';
 
 /** Largest JSON body accepted: a full account setup is well under 1 KiB. */
@@ -17,12 +18,19 @@ export const MAX_BODY_BYTES = 4096;
 
 type Json = Record<string, unknown>;
 
-/** Reads a JSON object body of at most `MAX_BODY_BYTES`. */
+/** Reads a JSON object body of at most `MAX_BODY_BYTES`, streaming and stopping at the limit. */
 export async function readJsonBody(request: Request): Promise<Json> {
-  const declared = Number(request.headers.get('Content-Length') ?? '0');
-  if (declared > MAX_BODY_BYTES) throw tooLarge();
-  const bytes = new Uint8Array(await request.arrayBuffer());
-  if (bytes.length > MAX_BODY_BYTES) throw tooLarge();
+  let bytes: Uint8Array;
+  try {
+    ({ bytes } = await readBounded(
+      request,
+      MAX_BODY_BYTES,
+      'reject',
+      new AbortController().signal,
+    ));
+  } catch {
+    throw tooLarge();
+  }
   let body: unknown;
   try {
     body = JSON.parse(new TextDecoder().decode(bytes));
