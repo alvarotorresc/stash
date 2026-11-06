@@ -1,4 +1,14 @@
+import { resolveSession } from './auth/session';
+import { createExtractRoutes, DEFAULT_LIMITS } from './extract/routes';
 import { jsonData, jsonError } from './http';
+import { allowAll } from './rate-limit';
+
+const extractRoutes = createExtractRoutes({
+  fetch: (input, init) => fetch(input, init),
+  resolveSession,
+  rateLimiter: allowAll,
+  limits: DEFAULT_LIMITS,
+});
 
 export default {
   async fetch(request): Promise<Response> {
@@ -10,6 +20,9 @@ export default {
       }
       return jsonData({ ok: true });
     }
+
+    const extractResponse = await extractRoutes(request, pathname);
+    if (extractResponse) return extractResponse;
 
     return jsonError('NOT_FOUND', 'Not found', 404);
   },

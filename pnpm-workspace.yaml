@@ -4,6 +4,10 @@ packages:
 
 saveExact: true
 
+# libsodium-wrappers-sumo asks for libsodium-sumo ^0.8.0; pin the exact build that was reviewed.
+overrides:
+  libsodium-sumo: 0.8.4
+
 # Dependencies whose install scripts are not needed: they ship prebuilt binaries.
 allowBuilds:
   esbuild: false

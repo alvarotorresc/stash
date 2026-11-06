@@ -4,3 +4,9 @@ declare namespace Cloudflare {
     mainModule: typeof import('../src/index');
   }
 }
+
+/* Vite raw imports, used to read configuration files from the tests. */
+declare module '*?raw' {
+  const content: string;
+  export default content;
+}

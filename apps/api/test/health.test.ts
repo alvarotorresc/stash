@@ -36,3 +36,28 @@ describe('unknown routes', () => {
     expect(await res.json()).toEqual({ error: { code: 'NOT_FOUND', message: 'Not found' } });
   });
 });
+
+describe('extraction routes in the deployed worker', () => {
+  it.each(['/api/extract', '/api/extract/image'])(
+    'should fail closed with 401 on %s while sessions do not exist',
+    async (path) => {
+      const res = await exports.default.fetch(`${BASE_URL}${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: 'https://blog.example.org/post' }),
+      });
+
+      expect(res.status).toBe(401);
+      expect(await res.json()).toEqual({
+        error: { code: 'UNAUTHORIZED', message: 'Authentication required' },
+      });
+    },
+  );
+
+  it('should reject other methods with 405', async () => {
+    const res = await exports.default.fetch(`${BASE_URL}/api/extract`);
+
+    expect(res.status).toBe(405);
+    expect(res.headers.get('allow')).toBe('POST');
+  });
+});
