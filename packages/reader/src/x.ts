@@ -3,7 +3,8 @@ import { ReaderInputError } from './errors';
 import { cleanText, extractMeta, type PageMeta } from './meta';
 import { excerpt, safely } from './result';
 import { detectSource } from './source';
-import { htmlToText, sanitizeHtml } from './sanitize';
+import { buildContent, exceedsInputLimit, exceedsStructureLimits, headOf } from './limits';
+import { sanitizeHtml } from './sanitize';
 import type { ReaderContent, ReaderIssue, ReaderResult } from './types';
 import { resolveHttpUrl, sameSiteCanonical } from './url';
 
@@ -76,18 +77,24 @@ function handleFrom(authorUrl: string | null): string | null {
 function readTweet(
   oembed: XOembed,
   url: string,
-): { content: ReaderContent; publishedAt: string | null } {
+): { content: ReaderContent; publishedAt: string | null; issues: ReaderIssue[] } {
   const { doc } = parseHtmlPage(oembed.html, url);
+  if (exceedsStructureLimits(doc.documentElement)) {
+    return { content: { kind: 'none', text: '' }, publishedAt: null, issues: ['too_large'] };
+  }
   const blockquote = doc.querySelector('blockquote') ?? doc.body;
   const paragraph = blockquote.querySelector('p');
   const links = blockquote.querySelectorAll(':scope > a');
   const publishedAt = parseOembedDate(links[links.length - 1]?.textContent);
   const html = paragraph ? sanitizeHtml(paragraph.innerHTML, url) : '';
-  const text = html ? htmlToText(html) : '';
-  return {
-    content: text ? { kind: 'tweet', html, text } : { kind: 'none', text: '' },
-    publishedAt,
-  };
+  return { ...buildContent(html, 'tweet'), publishedAt };
+}
+
+/** True when the oEmbed response (JSON string or its `html` field) is over the input limit. */
+function isOversizedOembed(value: unknown): boolean {
+  if (typeof value === 'string') return exceedsInputLimit(value);
+  const html = (value as { html?: unknown } | null)?.html;
+  return typeof html === 'string' && exceedsInputLimit(html);
 }
 
 /**
@@ -119,6 +126,9 @@ const EMPTY_META: PageMeta = {
  * - `oembed` is untrusted: an object or a JSON string; anything else degrades to the page metadata
  *   or to a minimal result.
  *
+ * - Over the size limit (2 MiB), the oEmbed response is ignored and the page only gives the
+ *   metadata at its start; the result records `too_large`.
+ *
  * Throws `ReaderInputError` only for an invalid URL or a non-string `pageHtml`.
  */
 export function parseXOembed(oembed: unknown, url: string, pageHtml?: string): ReaderResult {
@@ -126,11 +136,17 @@ export function parseXOembed(oembed: unknown, url: string, pageHtml?: string): R
     throw new ReaderInputError('pageHtml must be a string');
   }
   return safely(url, (href, source) => {
-    const page = pageHtml ? parseHtmlPage(pageHtml, href) : null;
+    // Over the size limit, the page is only read for the metadata at its start and the oEmbed
+    // response is not read at all.
+    const pageOversized = pageHtml ? exceedsInputLimit(pageHtml) : false;
+    const page = pageHtml ? parseHtmlPage(pageOversized ? headOf(pageHtml) : pageHtml, href) : null;
     const meta = page ? extractMeta(page.doc, page.baseUrl) : EMPTY_META;
-    const data = readOembed(oembed);
-    const issues: ReaderIssue[] = oembed != null && !data ? ['oembed_invalid'] : [];
+    const oembedOversized = isOversizedOembed(oembed);
+    const data = oembedOversized ? null : readOembed(oembed);
     const tweet = data ? readTweet(data, href) : null;
+    const issues = new Set<ReaderIssue>(tweet?.issues);
+    if (pageOversized || oembedOversized) issues.add('too_large');
+    else if (oembed != null && !data) issues.add('oembed_invalid');
 
     let content: ReaderContent = tweet?.content ?? { kind: 'none', text: '' };
     if (content.kind === 'none' && meta.description) {
@@ -152,7 +168,7 @@ export function parseXOembed(oembed: unknown, url: string, pageHtml?: string): R
       imageUrl: meta.imageUrl,
       publishedAt: tweet?.publishedAt ?? meta.publishedAt,
       content,
-      issues,
+      issues: [...issues],
     };
   });
 }

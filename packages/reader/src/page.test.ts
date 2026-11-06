@@ -186,3 +186,43 @@ describe('parseDocument', () => {
     expect(() => parseDocument({} as Document, ARTICLE_URL)).toThrow(ReaderInputError);
   });
 });
+
+describe('parsePage limits', () => {
+  const HEAD =
+    '<head><title>Huge page</title><meta property="og:image" content="https://cdn.example.com/a.png"></head>';
+
+  it('should degrade input over the size limit to a preview with its metadata', () => {
+    const html = `<html>${HEAD}<body><article>${'<p>word word word.</p>'.repeat(110_000)}</article></body></html>`;
+    const result = parsePage(html, 'https://blog.example.com/huge');
+    expect(result).toMatchObject({
+      title: 'Huge page',
+      imageUrl: 'https://cdn.example.com/a.png',
+      content: { kind: 'none', text: '' },
+      issues: ['too_large'],
+    });
+  });
+
+  it('should degrade a page with too many elements to a preview', () => {
+    const html = `<html>${HEAD}<body><article>${'<p>word word word.</p>'.repeat(21_000)}</article></body></html>`;
+    const result = parsePage(html, 'https://blog.example.com/many');
+    expect(result).toMatchObject({
+      title: 'Huge page',
+      content: { kind: 'none', text: '' },
+      issues: ['too_large'],
+    });
+  });
+
+  it('should degrade parallel chains of deeply nested divs quickly', () => {
+    const chain = `${'<div>'.repeat(500)}<p>Some text that reader mode would score.</p>${'</div>'.repeat(500)}`;
+    const html = `<html>${HEAD}<body><article>${chain.repeat(97)}</article></body></html>`;
+    const start = performance.now();
+    const result = parsePage(html, 'https://blog.example.com/deep');
+    const elapsed = performance.now() - start;
+    expect([result.content.kind, result.issues, result.title]).toEqual([
+      'none',
+      ['too_large'],
+      'Huge page',
+    ]);
+    expect(elapsed).toBeLessThan(2000);
+  });
+});

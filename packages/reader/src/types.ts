@@ -23,7 +23,16 @@ export interface ReaderContent {
  * they degrade and record why here.
  */
 export type ReaderIssue =
-  'unexpected_error' | 'no_readable_content' | 'rss_invalid' | 'rss_no_entry' | 'oembed_invalid';
+  | 'unexpected_error'
+  | 'no_readable_content'
+  | 'rss_invalid'
+  | 'rss_no_entry'
+  | 'oembed_invalid'
+  /**
+   * The input, its number of elements, its nesting depth or the extracted content went over the
+   * limits (see `src/limits.ts`). The result degrades to a preview, or keeps the text without HTML.
+   */
+  | 'too_large';
 
 export interface ReaderResult {
   source: Source;

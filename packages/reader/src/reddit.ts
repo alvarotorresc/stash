@@ -2,8 +2,9 @@ import { parseHtmlPage } from './dom';
 import { ReaderInputError } from './errors';
 import { cleanText, toIsoDate } from './meta';
 import { excerpt, minimalResult, safely } from './result';
-import { htmlToText, sanitizeHtml } from './sanitize';
-import type { ReaderContent, ReaderResult } from './types';
+import { buildContent, exceedsInputLimit, exceedsStructureLimits } from './limits';
+import { sanitizeHtml } from './sanitize';
+import type { ReaderContent, ReaderIssue, ReaderResult } from './types';
 import { resolveHttpUrl, sameSiteCanonical } from './url';
 
 function child(parent: Element | null | undefined, name: string): Element | null {
@@ -25,13 +26,17 @@ function cleanAuthor(value: string | null): string | null {
  * trailer ("submitted by … [link] [comments]") that is dropped by taking that div only. Link posts
  * have no such div and give no content.
  */
-function readPostBody(escapedHtml: string | null, url: string): ReaderContent {
-  if (!escapedHtml) return { kind: 'none', text: '' };
+function readPostBody(
+  escapedHtml: string | null,
+  url: string,
+): { content: ReaderContent; issues: ReaderIssue[] } {
+  if (!escapedHtml) return { content: { kind: 'none', text: '' }, issues: [] };
   const { doc } = parseHtmlPage(escapedHtml, url);
+  if (exceedsStructureLimits(doc.documentElement)) {
+    return { content: { kind: 'none', text: '' }, issues: ['too_large'] };
+  }
   const body = doc.querySelector('div.md');
-  const html = body ? sanitizeHtml(body.innerHTML, url) : '';
-  const text = html ? htmlToText(html) : '';
-  return text ? { kind: 'post', html, text } : { kind: 'none', text: '' };
+  return buildContent(body ? sanitizeHtml(body.innerHTML, url) : '', 'post');
 }
 
 /**
@@ -39,11 +44,14 @@ function readPostBody(escapedHtml: string | null, url: string): ReaderContent {
  * starts with `t3_` (or the first entry); the rest are comments and are discarded. Missing
  * fields, such as a deleted author, become `null`.
  *
+ * A feed over the size limit (2 MiB) is not parsed: the result is minimal with `too_large`.
+ *
  * Throws `ReaderInputError` only for an invalid URL or a non-string `xml`.
  */
 export function parseRedditRss(xml: string, url: string): ReaderResult {
   if (typeof xml !== 'string') throw new ReaderInputError('xml must be a string');
   return safely(url, (href, source) => {
+    if (exceedsInputLimit(xml)) return minimalResult(href, ['too_large']);
     const doc = new DOMParser().parseFromString(xml, 'application/xml');
     if (doc.getElementsByTagName('parsererror').length > 0) {
       return minimalResult(href, ['rss_invalid']);
@@ -59,7 +67,7 @@ export function parseRedditRss(xml: string, url: string): ReaderResult {
       };
     }
 
-    const content = readPostBody(childText(entry, 'content'), href);
+    const { content, issues } = readPostBody(childText(entry, 'content'), href);
     const subreddit = child(entry, 'category')?.getAttribute('label') ?? null;
     return {
       source,
@@ -76,7 +84,7 @@ export function parseRedditRss(xml: string, url: string): ReaderResult {
       imageUrl: null,
       publishedAt: toIsoDate(childText(entry, 'published') ?? childText(entry, 'updated')),
       content,
-      issues: content.kind === 'none' ? ['no_readable_content'] : [],
+      issues: issues.length > 0 ? issues : content.kind === 'none' ? ['no_readable_content'] : [],
     };
   });
 }

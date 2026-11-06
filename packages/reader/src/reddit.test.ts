@@ -51,6 +51,29 @@ describe('parseRedditRss', () => {
     expect(parseRedditRss(forged, URL_).canonicalUrl).toBe(URL_);
   });
 
+  it('should not parse a feed over the size limit', () => {
+    const huge = REDDIT_RSS.replace(
+      '<title>A title</title>',
+      `<title>${'x'.repeat(2_200_000)}</title>`,
+    );
+    expect(parseRedditRss(huge, URL_)).toMatchObject({
+      url: URL_,
+      content: { kind: 'none', text: '' },
+      issues: ['too_large'],
+    });
+  });
+
+  it('should give no content for a post with too deep markup', () => {
+    const deep = `<div class="md">${'<div>'.repeat(200)}x${'</div>'.repeat(200)}</div>`;
+    const escaped = deep.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+    const feed = REDDIT_RSS.replace(
+      /<content type="html">[^<]*<\/content><id>t3_abc123/,
+      `<content type="html">${escaped}</content><id>t3_abc123`,
+    );
+    const result = parseRedditRss(feed, URL_);
+    expect([result.content.kind, result.issues]).toEqual(['none', ['too_large']]);
+  });
+
   it('should tolerate a deleted author', () => {
     const deleted = parseRedditRss(REDDIT_RSS_DELETED_AUTHOR, URL_);
     expect([deleted.author, deleted.publishedAt, deleted.content.kind]).toEqual([

@@ -12,6 +12,36 @@ describe('parseXOembed', () => {
     expect(result.canonicalUrl).toBe(URL_);
   });
 
+  it('should not parse an oEmbed response over the size limit', () => {
+    const huge = JSON.stringify({
+      ...X_OEMBED,
+      html: `<blockquote><p>${'x'.repeat(2_200_000)}</p></blockquote>`,
+    });
+    const asString = parseXOembed(huge, URL_);
+    const asObject = parseXOembed(JSON.parse(huge), URL_);
+    expect([
+      asString.issues,
+      asString.content.kind,
+      asObject.issues,
+      asObject.content.kind,
+    ]).toEqual([['too_large'], 'none', ['too_large'], 'none']);
+  });
+
+  it('should read the metadata from the start of a page over the size limit', () => {
+    const page = X_PAGE_HTML.replace('</body>', `${'<p>x</p>'.repeat(300_000)}</body>`);
+    const result = parseXOembed(X_OEMBED, URL_, page);
+    expect([result.imageUrl, result.issues]).toEqual([
+      'https://pbs.example.com/media/photo.jpg',
+      ['too_large'],
+    ]);
+  });
+
+  it('should give no content for a post with too deep markup', () => {
+    const deep = `<blockquote><p>${'<span>'.repeat(200)}x${'</span>'.repeat(200)}</p></blockquote>`;
+    const result = parseXOembed({ ...X_OEMBED, html: deep }, URL_);
+    expect([result.content.kind, result.issues]).toEqual(['none', ['too_large']]);
+  });
+
   it('should read text, author and date from oEmbed', () => {
     const result = parseXOembed(X_OEMBED, URL_);
     expect(result).toMatchObject({
