@@ -118,8 +118,8 @@ describe('Create account', () => {
 });
 
 describe('Recover', () => {
-  it('should change the password with the recovery code', async () => {
-    await renderApp('#/entrar', { signedIn: false });
+  it('should change the password with the recovery code and show the new code', async () => {
+    const { app } = await renderApp('#/entrar', { signedIn: false });
     await fireEvent.click(screen.getByRole('link', { name: 'He olvidado la contraseña' }));
     window.dispatchEvent(new HashChangeEvent('hashchange'));
     await screen.findByRole('heading', { level: 1, name: 'Recuperar con tu código' });
@@ -139,6 +139,13 @@ describe('Recover', () => {
 
     await type('Código de recuperación', 'k7qf 2m9x wd4r 8htn c3pv 6yjb q5la');
     await fireEvent.click(screen.getByRole('button', { name: 'Cambiar contraseña' }));
+
+    // The old code no longer works: the new one is shown once before going on.
+    await screen.findByRole('heading', { level: 1, name: 'Tu código de recuperación' });
+    expect(app.recoveryCode).toHaveLength(28);
+    expect(app.recoveryCode).not.toBe('K7QF2M9XWD4R8HTNC3PV6YJBQ5LA');
+    await fireEvent.click(screen.getByRole('checkbox'));
+    await fireEvent.click(screen.getByRole('button', { name: 'Continuar' }));
     expect(await screen.findByRole('heading', { level: 1, name: 'Pendientes' })).toBeTruthy();
   });
 

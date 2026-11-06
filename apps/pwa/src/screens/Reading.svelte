@@ -24,8 +24,10 @@
   // The list copy stays current after classifying; the detail adds the content.
   const item = $derived(app.item(id));
 
+  // The list copy changes when the page is read in the background or synced from
+  // another device: the detail follows it.
   $effect(() => {
-    void item?.queued;
+    void item;
     void app.service.getItem(id).then((loaded) => (detail = loaded));
   });
 
@@ -42,13 +44,11 @@
   const back = () => app.router.back();
 
   async function markRead() {
-    await app.markRead(id);
-    back();
+    if (await app.markRead(id)) back();
   }
 
   async function discard() {
-    await app.discard(id);
-    back();
+    if (await app.discard(id)) back();
   }
 </script>
 

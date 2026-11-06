@@ -6,6 +6,7 @@ const MESSAGES: Record<AccountError['code'], string> = {
   'weak-password': 'Elige una contraseña de al menos 10 caracteres que no sea muy común.',
   'invalid-code': 'El email o el código de recuperación no son correctos.',
   'wrong-password': 'La contraseña no es correcta.',
+  'rate-limited': 'Demasiados intentos seguidos. Espera unos minutos y vuelve a intentarlo.',
   offline: 'Sin conexión. Para entrar o crear la cuenta hace falta red.',
 };
 

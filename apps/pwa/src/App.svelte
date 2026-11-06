@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { UndoToast } from '@stash/ui';
+  import { IconButton, UndoToast } from '@stash/ui';
   import { provideApp, type AppState } from './lib/app.svelte';
   import { readSharedParam } from './share';
   import Categories from './screens/Categories.svelte';
@@ -75,6 +75,12 @@
       <Home />
     {/if}
     <SaveFlow />
+    {#if app.failure}
+      <div class="failure" role="alert">
+        <p>{app.failure}</p>
+        <IconButton icon="close" label="Cerrar aviso" onclick={() => app.dismissFailure()} />
+      </div>
+    {/if}
     <UndoToast toast={app.toast} onundo={(id) => app.undo(id)} onexpire={(id) => app.expire(id)} />
   {/if}
 </div>
@@ -87,5 +93,27 @@
     max-width: 640px;
     margin: 0 auto;
     background: var(--bg);
+  }
+  .failure {
+    position: fixed;
+    right: 12px;
+    bottom: calc(88px + env(safe-area-inset-bottom, 0px));
+    left: 12px;
+    z-index: 20;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    max-width: 616px;
+    margin: 0 auto;
+    padding: 4px 4px 4px 14px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-block);
+    background: var(--surface);
+    color: var(--ink);
+    font-size: var(--fs-help);
+  }
+  .failure p {
+    flex: 1;
+    margin: 0;
   }
 </style>

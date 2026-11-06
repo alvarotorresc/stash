@@ -1,9 +1,9 @@
 import type { ImageData, PasswordStrength, Priority, SanitizedHtml, Tone } from '@stash/ui';
 
 /**
- * Everything the screens need from Stash. Screens only talk to this interface;
- * the in-memory mock implements it today and the real client (encryption,
- * sync and local cache) will implement it later without touching the screens.
+ * Everything the screens need from Stash. Screens only talk to this interface:
+ * the real service (`real/realService.ts`, over encryption, sync and the local
+ * cache) implements it, and so does the in-memory mock for tests and design.
  */
 
 export type Source = 'web' | 'x' | 'reddit' | 'instagram';
@@ -93,6 +93,7 @@ export type AccountErrorCode =
   | 'weak-password'
   | 'invalid-code'
   | 'wrong-password'
+  | 'rate-limited'
   | 'offline';
 
 export class AccountError extends Error {
@@ -101,6 +102,22 @@ export class AccountError extends Error {
   constructor(code: AccountErrorCode) {
     super(code);
     this.name = 'AccountError';
+    this.code = code;
+  }
+}
+
+/** Reverts a change; like any change, it needs the network. */
+export type Undo = () => Promise<void>;
+
+export type ChangeErrorCode = 'offline' | 'rate-limited' | 'failed';
+
+/** A change to the saved data that could not be made. */
+export class ChangeError extends Error {
+  readonly code: ChangeErrorCode;
+
+  constructor(code: ChangeErrorCode) {
+    super(code);
+    this.name = 'ChangeError';
     this.code = code;
   }
 }
@@ -114,8 +131,17 @@ export interface StashService {
   /** Creates the account and signs in. Returns the recovery code, shown once. */
   register(email: string, password: string): Promise<{ recoveryCode: string }>;
   login(email: string, password: string): Promise<void>;
-  /** Sets a new password with the recovery code and signs in. */
-  recover(email: string, recoveryCode: string, newPassword: string): Promise<void>;
+  /**
+   * Sets a new password with the recovery code and signs in. The old code stops
+   * working: the new one is returned to show once.
+   */
+  recover(
+    email: string,
+    recoveryCode: string,
+    newPassword: string,
+  ): Promise<{ recoveryCode: string }>;
+  /** Needs the current password; other devices are signed out. */
+  changePassword(currentPassword: string, newPassword: string): Promise<void>;
   /** Signs out and clears the local copy on this device. */
   logout(): Promise<void>;
   deleteAccount(password: string): Promise<void>;
@@ -126,8 +152,8 @@ export interface StashService {
   /** Saves a link; offline it waits in the queue (queued: true). */
   save(url: string): Promise<Item>;
   classify(id: string, change: Classification): Promise<void>;
-  /** Marks read or discarded; setting "pending" again is the undo. */
-  setStatus(id: string, status: Status): Promise<void>;
+  /** Marks read, discarded or pending. Returns the undo, which restores the previous status. */
+  setStatus(id: string, status: Status): Promise<Undo>;
   search(filters: SearchFilters): Promise<SearchResult[]>;
 
   // Categories, in order of importance.

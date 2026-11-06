@@ -19,13 +19,19 @@
   const item = $derived(last ? app.item(last.itemId) : undefined);
 
   // Every change is kept at once: closing the sheet never loses what was touched.
+  // Without connection the change fails and the app says so.
   function change(classification: Classification) {
-    if (item) void app.service.classify(item.id, classification);
+    const id = item?.id;
+    if (id) void app.change(() => app.service.classify(id, classification));
   }
 
-  async function createCategory(name: string) {
-    const category = await app.service.createCategory(name);
-    change({ categoryId: category.id });
+  function createCategory(name: string) {
+    const id = item?.id;
+    if (!id) return;
+    void app.change(async () => {
+      const category = await app.service.createCategory(name);
+      await app.service.classify(id, { categoryId: category.id });
+    });
   }
 </script>
 

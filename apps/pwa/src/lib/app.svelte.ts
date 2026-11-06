@@ -1,7 +1,8 @@
 import { getContext, setContext } from 'svelte';
 import type { TagSuggestion, UndoToastData } from '@stash/ui';
+import { changeMessage } from './attempt';
 import { Router } from './router.svelte';
-import type { Category, Item, Session, StashService, TagInfo } from './service';
+import type { Category, Item, Session, StashService, Status, TagInfo, Undo } from './service';
 
 /** The save sheet: just shared, waiting offline, or classifying an existing item. */
 export interface SheetState {
@@ -11,7 +12,7 @@ export interface SheetState {
 
 interface UndoAction {
   id: UndoToastData['id'];
-  undo: () => Promise<void>;
+  undo: Undo;
 }
 
 const MAX_TAG_SUGGESTIONS = 4;
@@ -42,6 +43,8 @@ export class AppState {
   recoveryCode = $state<string | null>(null);
   /** A link shared while signed out, saved after signing in. */
   pendingShare = $state<string | null>(null);
+  /** Why the last change could not be made, until dismissed or the next one works. */
+  failure = $state<string | null>(null);
 
   /** What Deshacer reverts: only the last action, like the toast. */
   #undo: UndoAction | null = null;
@@ -119,8 +122,28 @@ export class AppState {
       this.pendingShare = url;
       return;
     }
-    const item = await this.service.save(url);
-    this.openSheet({ variant: item.queued ? 'queued' : 'saved', itemId: item.id });
+    try {
+      const item = await this.service.save(url);
+      this.openSheet({ variant: item.queued ? 'queued' : 'saved', itemId: item.id });
+    } catch {
+      this.failure = 'No se ha podido guardar el enlace. Vuelve a compartirlo en un momento.';
+    }
+  }
+
+  /** Runs a change; on failure it tells why and returns false. */
+  async change(run: () => Promise<unknown>): Promise<boolean> {
+    try {
+      await run();
+      this.failure = null;
+      return true;
+    } catch (failure) {
+      this.failure = changeMessage(failure);
+      return false;
+    }
+  }
+
+  dismissFailure() {
+    this.failure = null;
   }
 
   openSheet(sheet: SheetState) {
@@ -135,20 +158,28 @@ export class AppState {
     this.router.closeOverlay();
   }
 
-  async markRead(id: string) {
-    await this.service.setStatus(id, 'read');
-    this.#showUndo('Marcado como leído', () => this.service.setStatus(id, 'pending'));
+  /** Marks it read; returns false when it could not (the failure says why). */
+  markRead(id: string): Promise<boolean> {
+    return this.#setStatus(id, 'read', 'Marcado como leído');
   }
 
-  async discard(id: string) {
-    await this.service.setStatus(id, 'discarded');
-    this.#showUndo('Descartado', () => this.service.setStatus(id, 'pending'));
+  discard(id: string): Promise<boolean> {
+    return this.#setStatus(id, 'discarded', 'Descartado');
+  }
+
+  async #setStatus(id: string, status: Status, message: string): Promise<boolean> {
+    let undo: Undo | undefined;
+    const done = await this.change(async () => {
+      undo = await this.service.setStatus(id, status);
+    });
+    if (undo) this.#showUndo(message, undo);
+    return done;
   }
 
   async undo(id: UndoToastData['id']) {
     const action = this.#undo?.id === id ? this.#undo : null;
     this.expire(id);
-    await action?.undo();
+    if (action) await this.change(action.undo);
   }
 
   expire(id: UndoToastData['id']) {
@@ -157,7 +188,7 @@ export class AppState {
   }
 
   /** One toast at a time: a new one replaces the previous. */
-  #showUndo(message: string, undo: () => Promise<void>) {
+  #showUndo(message: string, undo: Undo) {
     const id = ++this.#toastId;
     this.#undo = { id, undo };
     this.toast = { id, message };
@@ -166,6 +197,7 @@ export class AppState {
   async logout() {
     await this.service.logout();
     this.toast = null;
+    this.failure = null;
     this.router.replace({ name: 'login' });
   }
 }

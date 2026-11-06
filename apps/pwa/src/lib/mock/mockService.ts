@@ -1,6 +1,7 @@
 import type { PasswordStrength } from '@stash/ui';
 import {
   AccountError,
+  ChangeError,
   type Category,
   type Classification,
   type Item,
@@ -102,6 +103,11 @@ export function createMockService(options: MockOptions = {}): StashService {
 
   function requireOnline() {
     if (!online) throw new AccountError('offline');
+  }
+
+  /** Changes to the data need the network, as with the real service. */
+  function requireConnection() {
+    if (!online) throw new ChangeError('offline');
   }
 
   function find(id: string) {
@@ -228,8 +234,21 @@ export function createMockService(options: MockOptions = {}): StashService {
       if (!account || account.recoveryCode !== code) throw new AccountError('invalid-code');
       if (!acceptable(newPassword)) throw new AccountError('weak-password');
       account.password = newPassword;
+      account.recoveryCode = newRecoveryCode();
       signIn(normalized);
       notify();
+      return { recoveryCode: account.recoveryCode };
+    },
+
+    async changePassword(currentPassword, newPassword) {
+      await wait();
+      requireOnline();
+      const account = accounts.find((candidate) => candidate.email === session?.email);
+      if (!account || account.password !== currentPassword) {
+        throw new AccountError('wrong-password');
+      }
+      if (!acceptable(newPassword)) throw new AccountError('weak-password');
+      account.password = newPassword;
     },
 
     async logout() {
@@ -293,7 +312,7 @@ export function createMockService(options: MockOptions = {}): StashService {
 
     async classify(id, change: Classification) {
       await wait();
-      requireOnline();
+      requireConnection();
       const item = find(id);
       if (change.priority !== undefined) item.priority = change.priority;
       if (change.categoryId !== undefined) item.categoryId = change.categoryId;
@@ -303,9 +322,17 @@ export function createMockService(options: MockOptions = {}): StashService {
 
     async setStatus(id, status: Status) {
       await wait();
-      requireOnline();
-      find(id).status = status;
+      requireConnection();
+      const item = find(id);
+      const before = item.status;
+      item.status = status;
       notify();
+      return async () => {
+        await wait();
+        requireConnection();
+        find(id).status = before;
+        notify();
+      };
     },
 
     async search(filters: SearchFilters) {
@@ -351,7 +378,7 @@ export function createMockService(options: MockOptions = {}): StashService {
 
     async createCategory(name) {
       await wait();
-      requireOnline();
+      requireConnection();
       const trimmed = name.trim();
       const existing = categories.find((category) => fold(category.name) === fold(trimmed));
       if (existing) return { ...existing, count: 0 };
@@ -363,7 +390,7 @@ export function createMockService(options: MockOptions = {}): StashService {
 
     async renameCategory(id, name) {
       await wait();
-      requireOnline();
+      requireConnection();
       categories = categories.map((category) =>
         category.id === id ? { ...category, name: name.trim() } : category,
       );
@@ -372,7 +399,7 @@ export function createMockService(options: MockOptions = {}): StashService {
 
     async deleteCategory(id) {
       await wait();
-      requireOnline();
+      requireConnection();
       categories = categories.filter((category) => category.id !== id);
       for (const item of items) if (item.categoryId === id) item.categoryId = null;
       notify();
@@ -380,7 +407,7 @@ export function createMockService(options: MockOptions = {}): StashService {
 
     async reorderCategories(ids) {
       await wait();
-      requireOnline();
+      requireConnection();
       const byId = new Map(categories.map((category) => [category.id, category]));
       categories = ids.map((id) => byId.get(id)).filter((category) => category !== undefined);
       notify();
@@ -399,7 +426,7 @@ export function createMockService(options: MockOptions = {}): StashService {
 
     async renameTag(name, newName) {
       await wait();
-      requireOnline();
+      requireConnection();
       const target = newName.trim();
       for (const item of items) {
         if (item.tags.includes(name)) {
@@ -411,7 +438,7 @@ export function createMockService(options: MockOptions = {}): StashService {
 
     async deleteTag(name) {
       await wait();
-      requireOnline();
+      requireConnection();
       for (const item of items) item.tags = item.tags.filter((tag) => tag !== name);
       notify();
     },
