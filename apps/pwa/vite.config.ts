@@ -9,6 +9,8 @@ export default defineConfig({
       strategies: 'injectManifest',
       srcDir: 'src',
       filename: 'sw.ts',
+      // The self-hosted fonts too, so the app looks the same offline.
+      injectManifest: { globPatterns: ['**/*.{js,css,html,woff2}'] },
       manifest: {
         name: 'Stash',
         short_name: 'Stash',
