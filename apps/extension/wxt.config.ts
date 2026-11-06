@@ -62,6 +62,12 @@ export default defineConfig({
       'packages/core/**',
       'packages/ui/**',
     ],
-    excludeSources: ['**/coverage/**', '**/.output/**', '**/.wxt/**', '**/node_modules/**'],
+    excludeSources: [
+      '**/coverage/**',
+      '**/dist/**',
+      '**/.output/**',
+      '**/.wxt/**',
+      '**/node_modules/**',
+    ],
   },
 });
