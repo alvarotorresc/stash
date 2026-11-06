@@ -99,7 +99,7 @@
     saveFailed = false;
     try {
       const [item, loadedCategories, loadedTags] = await Promise.all([
-        service.save({ url, title: page.title }),
+        service.save({ ...page, url }),
         service.listCategories(),
         service.listTags(),
       ]);

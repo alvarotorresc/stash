@@ -1,4 +1,4 @@
-import { toHttpUrl, type Page } from './service';
+import { parseMessage, type Message, type MessageResponse } from './messages';
 
 export const SAVE_LINK_MENU_ID = 'stash-save-link';
 
@@ -6,6 +6,7 @@ export const SAVE_LINK_MENU_ID = 'stash-save-link';
 export interface MenuApi {
   runtime: { onInstalled: { addListener(callback: () => void): void } };
   contextMenus: {
+    removeAll(): Promise<void>;
     create(properties: { id: string; title: string; contexts: ['link'] }): unknown;
     onClicked: {
       addListener(
@@ -16,20 +17,27 @@ export interface MenuApi {
 }
 
 /**
- * "Guardar en Stash" on any link. The page behind the link is not open, so
- * only its address is saved here; the title arrives when it is read.
+ * "Guardar en Stash" on any link. The page behind the link is not open, so the click becomes a
+ * save-link message with its address only, handled like one sent by the popup; the service then
+ * extracts the page through the proxy.
  */
-export function registerSaveLinkMenu(api: MenuApi, save: (page: Page) => Promise<unknown>) {
+export function registerSaveLinkMenu(
+  api: MenuApi,
+  dispatch: (message: Message) => Promise<MessageResponse>,
+) {
   api.runtime.onInstalled.addListener(() => {
-    api.contextMenus.create({
-      id: SAVE_LINK_MENU_ID,
-      title: 'Guardar en Stash',
-      contexts: ['link'],
-    });
+    // Updates keep the menus of the previous version: start clean to avoid a duplicate id.
+    void api.contextMenus.removeAll().then(() =>
+      api.contextMenus.create({
+        id: SAVE_LINK_MENU_ID,
+        title: 'Guardar en Stash',
+        contexts: ['link'],
+      }),
+    );
   });
   api.contextMenus.onClicked.addListener((info) => {
     if (info.menuItemId !== SAVE_LINK_MENU_ID) return;
-    const url = toHttpUrl(info.linkUrl);
-    if (url) void save({ url, title: url });
+    const message = parseMessage({ type: 'save-link', url: info.linkUrl });
+    if (message) void dispatch(message);
   });
 }
