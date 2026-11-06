@@ -65,7 +65,9 @@ Errors are `CryptoError` with a `code`: `CREDENTIALS_USED`, `DECRYPTION_FAILED`,
   hostile server from making a phone hang.
 - **Upgrades.** When an account logs in with parameters below the current defaults,
   `unlockDataKey` also returns `upgrade`: the same password under a new salt and the defaults,
-  with the data key re-wrapped. Send it to the server in the session that just logged in.
+  with the data key re-wrapped. Send it to the server in the session that just logged in. The
+  server cannot tell an upgrade from a password change, so it closes the account's other
+  sessions as a change does: raising the defaults logs every other device out once.
 - **Salt bound to the email.** The Argon2id salt is
   `SHA-256("stash/v1/argon2id-salt" ‖ u32be(len(email)) ‖ email ‖ serverSalt)[0..16]`, with the
   email trimmed, NFC-normalised and lowercased. A server cannot make several accounts share a

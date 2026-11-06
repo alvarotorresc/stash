@@ -187,7 +187,7 @@ describe('PUT /api/account/kdf', () => {
     iterations: DEFAULT_KDF_PARAMS.iterations + 1,
   };
 
-  it('should accept stronger parameters and keep every session open', async () => {
+  it('should accept stronger parameters and close every other session', async () => {
     const { email, keys, token } = await register();
     const other = await login(email, keys.loginKey);
     const upgrade = passwordSetup(STRONGER);
@@ -198,7 +198,7 @@ describe('PUT /api/account/kdf', () => {
       kdf: (await dataOf<AccountResponse>(await call(API_PATHS.account, { token }))).kdf,
       other: (await call(API_PATHS.account, { token: other })).status,
       login: await loginStatus(email, upgrade.loginKey),
-    }).toEqual({ kdf: STRONGER, other: 200, login: 200 });
+    }).toEqual({ kdf: STRONGER, other: 401, login: 200 });
   });
 
   it.each([

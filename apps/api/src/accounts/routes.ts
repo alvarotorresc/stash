@@ -182,18 +182,12 @@ async function beginPasswordChange(context: Context): Promise<Response> {
 /**
  * Replaces the password setup, proven with the current login key. The update only applies if
  * the stored digest is still the one that was checked, so two concurrent changes cannot both
- * win. With `revokeOtherSessions`, every other session of the account is closed in the same
- * transaction, and only when the update applied.
+ * win. Every other session of the account is closed in the same transaction, and only when the
+ * update applied.
  */
 async function replacePassword(
   context: Context,
-  {
-    revokeOtherSessions,
-    check,
-  }: {
-    revokeOtherSessions: boolean;
-    check?: (user: UserRow, keys: ParsedPasswordSetup) => void;
-  },
+  check?: (user: UserRow, keys: ParsedPasswordSetup) => void,
 ): Promise<Response> {
   const { request, db, pepper, now } = context;
   const session = await requireSession(context);
@@ -207,7 +201,7 @@ async function replacePassword(
   await proveLoginKey(context, user, currentLoginKey);
 
   const newHash = await hashKey(pepper, 'login-key', keys.loginKey);
-  const statements = [
+  const [update] = await db.batch([
     db
       .prepare(
         `UPDATE users SET salt = ?, kdf_memory_kib = ?, kdf_iterations = ?, login_key_hash = ?,
@@ -224,43 +218,36 @@ async function replacePassword(
         user.id,
         user.login_key_hash,
       ),
-  ];
-  if (revokeOtherSessions) {
-    statements.push(
-      db
-        .prepare(
-          `DELETE FROM sessions WHERE user_id = ?1 AND token_hash != ?2
-             AND EXISTS (SELECT 1 FROM users WHERE id = ?1 AND login_key_hash = ?3)`,
-        )
-        .bind(user.id, session.tokenHash, newHash),
-    );
-  }
-  const [update] = await db.batch(statements);
+    db
+      .prepare(
+        `DELETE FROM sessions WHERE user_id = ?1 AND token_hash != ?2
+           AND EXISTS (SELECT 1 FROM users WHERE id = ?1 AND login_key_hash = ?3)`,
+      )
+      .bind(user.id, session.tokenHash, newHash),
+  ]);
   if (update?.meta.changes !== 1) throw invalidCredentials('Wrong password', 403);
   return jsonData({ ok: true });
 }
 
 /** Password change: closes every other session of the account. */
 function changePassword(context: Context): Promise<Response> {
-  return replacePassword(context, { revokeOtherSessions: true });
+  return replacePassword(context);
 }
 
 /**
  * Argon2id parameter upgrade right after a login: same password, new salt and stronger
- * parameters. It must be strictly stronger, so this route cannot stand in for a password change
- * that keeps the other sessions open.
+ * parameters. The server cannot check that the new keys come from the same password, so with
+ * the current password this route could set a new one. It therefore closes every other session
+ * like a password change: whatever it is used for, it never leaves another device logged in.
  */
 function upgradeKdf(context: Context): Promise<Response> {
-  return replacePassword(context, {
-    revokeOtherSessions: false,
-    check(user, { kdf }) {
-      const current = kdfOf(user);
-      const notWeaker = kdf.memoryKiB >= current.memoryKiB && kdf.iterations >= current.iterations;
-      const stronger = kdf.memoryKiB > current.memoryKiB || kdf.iterations > current.iterations;
-      if (!notWeaker || !stronger) {
-        throw validationError('kdf must be stronger than the current parameters');
-      }
-    },
+  return replacePassword(context, (user, { kdf }) => {
+    const current = kdfOf(user);
+    const notWeaker = kdf.memoryKiB >= current.memoryKiB && kdf.iterations >= current.iterations;
+    const stronger = kdf.memoryKiB > current.memoryKiB || kdf.iterations > current.iterations;
+    if (!notWeaker || !stronger) {
+      throw validationError('kdf must be stronger than the current parameters');
+    }
   });
 }
 
