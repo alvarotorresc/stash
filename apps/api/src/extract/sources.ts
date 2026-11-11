@@ -146,6 +146,66 @@ async function extractX(status: { user: string; id: string }, ctx: SourceContext
   return result;
 }
 
+// --- TikTok: official oEmbed + the video page, which carries the caption, author and cover. ---
+
+/** The account may be empty (`/@/video/<id>`): tiktok.com answers share links with that shape. */
+const TIKTOK_VIDEO = /^\/@([\w.-]{0,64})\/video\/(\d{1,25})(?:\/|$)/;
+const TIKTOK_SHARE = /^\/t\/[^/]+/;
+
+export function isTikTokUrl(url: URL): boolean {
+  return hostIs(url, 'tiktok.com');
+}
+
+export function tiktokVideo(url: URL): { user: string; id: string } | null {
+  if (!isTikTokUrl(url)) return null;
+  const match = TIKTOK_VIDEO.exec(url.pathname);
+  if (!match) return null;
+  const [, user = '', id = ''] = match;
+  return { user, id };
+}
+
+function isTikTokShortLink(url: URL): boolean {
+  const host = url.hostname.toLowerCase().replace(/\.$/, '');
+  if (host === 'vm.tiktok.com' || host === 'vt.tiktok.com') return url.pathname.length > 1;
+  return isTikTokUrl(url) && TIKTOK_SHARE.test(url.pathname);
+}
+
+async function extractTikTok(url: URL, ctx: SourceContext): Promise<ExtractData> {
+  let video = tiktokVideo(url);
+  if (!video && isTikTokShortLink(url)) {
+    try {
+      const target = await resolveRedirects(url, ctx, (hop) => tiktokVideo(hop) !== null);
+      video = tiktokVideo(target);
+    } catch (error) {
+      // A share link that is gone, or that tiktok.com does not serve to this proxy, ends on its
+      // home page: the client keeps the plain link.
+      if (error instanceof UpstreamError && error.code === 'UPSTREAM_ERROR') {
+        return { kind: 'tiktok', oembed: null, page: null };
+      }
+      throw error;
+    }
+  }
+  // Not a video (a profile, a tag...): treat it as any other page.
+  if (!video) return extractWeb(url, ctx);
+
+  // Rebuilt from the account and the id alone: the tracking parameters of a shared link identify
+  // who shared it, and none of them travels to TikTok.
+  const canonical = `https://www.tiktok.com/@${video.user}/video/${video.id}`;
+  const oembedUrl = new URL('https://www.tiktok.com/oembed');
+  oembedUrl.searchParams.set('url', canonical);
+
+  const [oembed, page] = await Promise.allSettled([
+    fetchDocument(oembedUrl, JSON_DOC, ctx),
+    fetchDocument(new URL(canonical), HTML, ctx),
+  ]);
+  if (oembed.status === 'rejected' && page.status === 'rejected') throw oembed.reason;
+  return {
+    kind: 'tiktok',
+    oembed: oembed.status === 'fulfilled' ? oembed.value : null,
+    page: page.status === 'fulfilled' ? page.value : null,
+  };
+}
+
 // --- Instagram: preview from meta tags only; never the embed page. ---
 
 export function isInstagramUrl(url: URL): boolean {
@@ -179,5 +239,6 @@ export async function extract(url: URL, ctx: SourceContext): Promise<ExtractData
   const status = xStatus(url);
   if (status) return extractX(status, ctx);
   if (isInstagramUrl(url)) return extractInstagram(url, ctx);
+  if (isTikTokUrl(url)) return extractTikTok(url, ctx);
   return extractWeb(url, ctx);
 }

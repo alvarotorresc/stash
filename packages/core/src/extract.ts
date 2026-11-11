@@ -104,7 +104,7 @@ export const EXTRACT_ERROR_CODES = [
   'METHOD_NOT_ALLOWED',
   /**
    * 413: image larger than the limit (`/api/extract/image`), or, on `/api/extract`, the oEmbed JSON
-   * of an X post larger than its limit while the post page could not be fetched either.
+   * of an X post or a TikTok video larger than its limit while the post page could not be fetched either.
    */
   'TOO_LARGE',
   /** 415: request body is not JSON, or the origin answered a content type that is not allowed. */
