@@ -20,6 +20,9 @@
     onclassify: () => void;
     ondiscard: () => void;
     onmarkread: () => void;
+    /** Where the item is now: read and discarded ones offer to go back to pending. */
+    status?: 'pending' | 'read' | 'discarded';
+    onrestore?: () => void;
     /** ArticleContent, TweetContent, RedditContent or PreviewContent. */
     children: Snippet;
   }
@@ -35,6 +38,8 @@
     onclassify,
     ondiscard,
     onmarkread,
+    status = 'pending',
+    onrestore,
     children,
   }: Props = $props();
 
@@ -65,17 +70,34 @@
     </p>
   {/if}
   <div class="bottom">
-    <Button
-      unavailable={!online}
-      aria-describedby={online ? undefined : offlineId}
-      onclick={ondiscard}>Descartar</Button
-    >
-    <Button
-      variant="primary"
-      unavailable={!online}
-      aria-describedby={online ? undefined : offlineId}
-      onclick={onmarkread}>Marcar leído</Button
-    >
+    {#if status === 'discarded'}
+      <Button
+        unavailable={!online}
+        aria-describedby={online ? undefined : offlineId}
+        onclick={onmarkread}>Marcar leído</Button
+      >
+    {:else}
+      <Button
+        unavailable={!online}
+        aria-describedby={online ? undefined : offlineId}
+        onclick={ondiscard}>Descartar</Button
+      >
+    {/if}
+    {#if status === 'pending'}
+      <Button
+        variant="primary"
+        unavailable={!online}
+        aria-describedby={online ? undefined : offlineId}
+        onclick={onmarkread}>Marcar leído</Button
+      >
+    {:else}
+      <Button
+        variant="primary"
+        unavailable={!online}
+        aria-describedby={online ? undefined : offlineId}
+        onclick={onrestore}>Volver a pendientes</Button
+      >
+    {/if}
   </div>
 </div>
 
