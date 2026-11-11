@@ -5,7 +5,7 @@ import { createPopupService } from './popupService';
 import { AccountError, type PopupService } from './service';
 import { createBadgedPendingLinks } from './services';
 import type { TabApi } from './tab';
-import { EMAIL, otherDevice, PASSWORD, profile } from './test-utils';
+import { EMAIL, memoryArea, otherDevice, PASSWORD, profile } from './test-utils';
 
 const URL_A = 'https://blog.example.com/despensa';
 const URL_B = 'https://blog.example.com/otono';
@@ -86,6 +86,20 @@ describe('accounts', () => {
       asked: 1,
       calls: 0,
     });
+  });
+
+  it('should go on when the browser fails to answer the permission request', async () => {
+    const { service, stash } = await popup();
+    const failing = createPopupService({
+      stash,
+      tabApi: noTab,
+      pending: createBadgedPendingLinks(memoryArea(), () => {}),
+      requestHostAccess: () => Promise.reject(new Error('not allowed')),
+    });
+
+    await failing.login(EMAIL, PASSWORD);
+
+    expect(await service.getSession()).toEqual({ email: EMAIL });
   });
 
   it.each([

@@ -123,7 +123,9 @@ export function createPopupService(deps: PopupServiceDeps): PopupService {
 
     async login(email, password) {
       // First, before any await: the permission prompt needs the user's click.
-      const access = requestHostAccess();
+      // A failed request (a browser that refuses to ask for a declared host) is not a refusal:
+      // if the access is really missing, the API call below fails and says so.
+      const access = requestHostAccess().catch(() => true);
       if (!(await access)) throw new AccountError('no-access');
       try {
         await stash.login({ email, password });
