@@ -14,6 +14,7 @@ export default defineConfig({
       // Entry point bootstraps run only inside the browser.
       exclude: [
         '**/*.test.ts',
+        'lib/test-utils.ts',
         'entrypoints/**/main.ts',
         // Thin wrapper: the menu logic it calls is tested in lib/contextMenu.
         'entrypoints/background.ts',

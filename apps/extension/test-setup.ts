@@ -1,3 +1,10 @@
+import { FastKdfWorker } from '@stash/client/testing';
+import { vi } from 'vitest';
+
+// Argon2id runs in a module Web Worker, which jsdom lacks: the fast stand-in replaces it. The rest
+// of the key chain is the production code.
+vi.stubGlobal('Worker', FastKdfWorker);
+
 // jsdom gaps used by the components.
 if (!window.matchMedia) {
   window.matchMedia = (query: string) =>
