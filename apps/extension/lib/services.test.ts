@@ -123,7 +123,8 @@ describe('createBadgedPendingLinks', () => {
 });
 
 describe('createPopupService', () => {
-  it('should read the open tab and ask for the host permission when logging in', async () => {
+  it('should read the open tab, and log in to the API origin without cookies after asking for the host', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError('offline'));
     const api = fakeApi();
     const service = createPopupService(api);
 
@@ -132,8 +133,14 @@ describe('createPopupService', () => {
       title: 'T',
     });
     await expect(service.getSession()).resolves.toBeNull();
-    await service.login(EMAIL, PASSWORD).catch(() => {});
+    await expect(service.login(EMAIL, PASSWORD)).rejects.toMatchObject({ code: 'offline' });
+
     expect(api.permissions.request).toHaveBeenCalledWith({ origins: [`${API_ORIGIN}/*`] });
+    const [url, init] = fetchSpy.mock.calls[0] ?? [];
+    expect({ origin: new URL(String(url)).origin, credentials: init?.credentials }).toEqual({
+      origin: API_ORIGIN,
+      credentials: 'omit',
+    });
   });
 });
 
