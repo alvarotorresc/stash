@@ -12,6 +12,7 @@ import {
   SyncError,
   createIndexedDbRecordCache,
   createSyncClient,
+  type ReadResult,
   type RecordCache,
   type SavedLink,
   type SyncClient,
@@ -46,6 +47,14 @@ export interface UnlockedSession {
   readonly email: string;
   /** When the device stops remembering it (milliseconds since the epoch). */
   readonly expiresAt: number;
+}
+
+export interface SaveOptions {
+  /**
+   * The page was already read here (the extension reads the open tab): it is stored with the
+   * link and the proxy is not asked for it.
+   */
+  readonly read?: ReadResult;
 }
 
 export interface Stash {
@@ -84,7 +93,7 @@ export interface Stash {
    * already saved creates nothing and is not read again: the existing item comes back with
    * `alreadySaved: true`.
    */
-  save(url: string): Promise<SavedLink>;
+  save(url: string, options?: SaveOptions): Promise<SavedLink>;
   /**
    * Runs a change through the sync client, one at a time: each change starts from the copy the
    * previous one left, so a background read and a classification never overwrite each other.
@@ -351,10 +360,10 @@ export function createStash(options: StashOptions = {}): Stash {
     start,
     refresh,
 
-    async save(url) {
+    async save(url, { read } = {}) {
       await open();
-      const item = await guard(() => sync.saveLink({ url }));
-      if (!item.queued && !item.alreadySaved) void track(readItem(item.id));
+      const item = await guard(() => sync.saveLink(read ? { url, ...read } : { url }));
+      if (!read && !item.queued && !item.alreadySaved) void track(readItem(item.id));
       return item;
     },
 

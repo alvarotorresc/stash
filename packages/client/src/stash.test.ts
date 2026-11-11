@@ -8,6 +8,7 @@ import {
 import { SyncError, createIndexedDbRecordCache } from '@stash/core/sync';
 import { IDBFactory } from 'fake-indexeddb';
 import { afterEach, describe, expect, it } from 'vitest';
+import { readHtml } from './read';
 import { createStash, type Stash } from './stash';
 import { FakeBackend, webPage } from './test/backend';
 
@@ -313,6 +314,22 @@ describe('createStash', () => {
         before: { title: URL_A, queued: false, preview: null },
         after: { title: 'Cómo ordenar la despensa', kind: 'article', found: [saved.id] },
       });
+    });
+
+    it('should keep the read result it is given and not ask the proxy for the page', async () => {
+      const { backend, phone } = await registered();
+      const page = webPage(URL_A, 'La despensa', ['uno dos tres '.repeat(30)]);
+      const read = readHtml(page.kind === 'web' ? page.page.body : '', URL_A);
+
+      const saved = await phone.stash.save(URL_A, { read });
+      await phone.stash.idle();
+      const item = phone.stash.sync.getItem(saved.id);
+
+      expect({
+        title: item?.title,
+        kind: item?.content?.kind,
+        extracted: backend.extracted.length,
+      }).toEqual({ title: 'La despensa', kind: 'article', extracted: 0 });
     });
 
     it('should return the existing item for a link already saved, without reading it again', async () => {
