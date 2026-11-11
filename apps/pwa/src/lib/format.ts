@@ -5,6 +5,7 @@ export const SOURCE_LABELS: Record<Source, string> = {
   x: 'X',
   reddit: 'Reddit',
   instagram: 'Instagram',
+  tiktok: 'TikTok',
 };
 
 /** "Reddit, r/askspain": the origin line of a row. */

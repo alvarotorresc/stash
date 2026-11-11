@@ -146,6 +146,9 @@ describe('model helpers', () => {
     ['https://www.reddit.com/r/a', 'reddit'],
     ['https://old.reddit.com/r/a', 'reddit'],
     ['https://www.instagram.com/p/1', 'instagram'],
+    ['https://www.tiktok.com/@a/video/1', 'tiktok'],
+    ['https://vm.tiktok.com/ZMabc/', 'tiktok'],
+    ['https://nottiktok.com/@a/video/1', 'web'],
     ['https://blog.example.com', 'web'],
   ])('should detect the source of %s', (url, source) => {
     expect(detectSource(url)).toBe(source);

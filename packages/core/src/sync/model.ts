@@ -11,7 +11,7 @@ import { SyncError } from './errors';
 export const ITEM_STATUSES = ['pending', 'read', 'discarded'] as const;
 export type ItemStatus = (typeof ITEM_STATUSES)[number];
 
-export const SOURCES = ['web', 'x', 'reddit', 'instagram'] as const;
+export const SOURCES = ['web', 'x', 'reddit', 'instagram', 'tiktok'] as const;
 export type Source = (typeof SOURCES)[number];
 
 /** What kind of readable content was extracted; `none` means preview only. */
@@ -138,6 +138,8 @@ export function detectSource(url: string): Source {
   if (host === 'x.com' || host === 'twitter.com') return 'x';
   if (host === 'reddit.com' || host === 'redd.it') return 'reddit';
   if (host === 'instagram.com') return 'instagram';
+  // Subdomains included: `vm.tiktok.com` and `vt.tiktok.com` are its short links.
+  if (host === 'tiktok.com' || host.endsWith('.tiktok.com')) return 'tiktok';
   return 'web';
 }
 
