@@ -13,6 +13,10 @@ function extract(token?: string): Promise<Response> {
 }
 
 /** Guards the production wiring of /api/extract: real sessions and real rate limits. */
+function extractImage(token?: string): Promise<Response> {
+  return call('/api/extract/image', { method: 'POST', token, body: INVALID_BODY });
+}
+
 describe('/api/extract in production wiring', () => {
   it('should answer 401 without a session', async () => {
     expect(await errorOf(await extract())).toEqual({ status: 401, code: 'UNAUTHORIZED' });
@@ -52,5 +56,36 @@ describe('/api/extract in production wiring', () => {
       .run();
 
     expect((await extract(token)).status).toBe(429);
+  });
+
+  it('should require a session for images too', async () => {
+    expect(await errorOf(await extractImage())).toEqual({ status: 401, code: 'UNAUTHORIZED' });
+  });
+
+  it('should count images and pages in the same account limit', async () => {
+    const { token } = await register();
+    const half = LIMITS.extract.account.max / 2;
+    for (let index = 0; index < half; index++) {
+      await extract(token);
+      await extractImage(token);
+    }
+
+    expect({
+      page: await errorOf(await extract(token)),
+      image: await errorOf(await extractImage(token)),
+    }).toEqual({
+      page: { status: 429, code: 'RATE_LIMITED' },
+      image: { status: 429, code: 'RATE_LIMITED' },
+    });
+  });
+
+  it('should count images in the global daily cap', async () => {
+    const { token } = await register();
+    const key = toBase64Url(await hmac(env.PEPPER, 'rate-limit', 'extract\u0000global\u0000'));
+    await env.DB.prepare('INSERT INTO rate_limits (key, window_start, count) VALUES (?, ?, ?)')
+      .bind(key, Date.now(), LIMITS.extract.global.max)
+      .run();
+
+    expect((await extractImage(token)).status).toBe(429);
   });
 });

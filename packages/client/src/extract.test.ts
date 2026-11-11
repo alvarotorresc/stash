@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { ExtractError, createExtractor } from './extract';
+import { ExtractError, createExtractor, createImageFetcher } from './extract';
+import { EXTRACT_MAX_IMAGE_BYTES } from '@stash/core/extract';
 import { webPage } from './test/backend';
 
 const URL_A = 'https://example.com/a';
@@ -88,5 +89,151 @@ describe('createExtractor', () => {
       { code: 'BAD_RESPONSE', status: 200, permanent: false },
       { code: 'BAD_RESPONSE', status: 200, permanent: false },
     ]);
+  });
+});
+
+const IMAGE_URL = 'https://pbs.twimg.com/media/photo.jpg';
+
+describe('createImageFetcher', () => {
+  it('should ask the proxy, never the third party, with the URL in the body', async () => {
+    const seen: { url: string; init: RequestInit | undefined }[] = [];
+    const fetchImage = createImageFetcher({
+      baseUrl: 'https://stash.test',
+      fetch: async (input, init) => {
+        seen.push({ url: String(input), init });
+        return new Response(new Uint8Array([1, 2, 3]), {
+          headers: { 'Content-Type': 'image/jpeg' },
+        });
+      },
+    });
+
+    const image = await fetchImage('token-1', IMAGE_URL);
+    const [call] = seen;
+
+    expect({
+      type: image.type,
+      bytes: [...image.bytes],
+      url: call?.url,
+      body: call?.init?.body,
+      auth: new Headers(call?.init?.headers).get('Authorization'),
+      credentials: call?.init?.credentials,
+    }).toEqual({
+      type: 'image/jpeg',
+      bytes: [1, 2, 3],
+      url: 'https://stash.test/api/extract/image',
+      body: JSON.stringify({ url: IMAGE_URL }),
+      auth: 'Bearer token-1',
+      credentials: 'omit',
+    });
+  });
+
+  it.each([
+    'data:image/png;base64,AAAA',
+    '/relative.png',
+    'javascript:alert(1)',
+    'ftp://x.test/a.png',
+  ])('should not even ask the proxy for %s', async (url) => {
+    let calls = 0;
+    const fetchImage = createImageFetcher({
+      fetch: async () => {
+        calls += 1;
+        return new Response();
+      },
+    });
+
+    expect(await failureOf(fetchImage('t', url))).toEqual({
+      code: 'URL_NOT_ALLOWED',
+      status: null,
+      permanent: true,
+    });
+    expect(calls).toBe(0);
+  });
+
+  it.each(['image/svg+xml', 'text/html', 'application/json', ''])(
+    'should refuse the content type "%s"',
+    async (type) => {
+      const fetchImage = createImageFetcher({
+        fetch: async () => new Response('<svg/>', { headers: { 'Content-Type': type } }),
+      });
+
+      expect(await failureOf(fetchImage('t', IMAGE_URL))).toMatchObject({
+        code: 'UNSUPPORTED_MEDIA_TYPE',
+        permanent: true,
+      });
+    },
+  );
+
+  it('should accept a content type with parameters and capitals', async () => {
+    const fetchImage = createImageFetcher({
+      fetch: async () =>
+        new Response(new Uint8Array([1]), { headers: { 'Content-Type': 'IMAGE/WEBP; q=1' } }),
+    });
+
+    expect((await fetchImage('t', IMAGE_URL)).type).toBe('image/webp');
+  });
+
+  it('should refuse a body over the limit, declared or not', async () => {
+    const declared = createImageFetcher({
+      fetch: async () =>
+        new Response(new Uint8Array([1]), {
+          headers: {
+            'Content-Type': 'image/png',
+            'Content-Length': String(EXTRACT_MAX_IMAGE_BYTES + 1),
+          },
+        }),
+    });
+    const hidden = createImageFetcher({
+      fetch: async () =>
+        new Response(new Uint8Array(EXTRACT_MAX_IMAGE_BYTES + 1), {
+          headers: { 'Content-Type': 'image/png' },
+        }),
+    });
+
+    expect([
+      (await failureOf(declared('t', IMAGE_URL))) as { code: string },
+      (await failureOf(hidden('t', IMAGE_URL))) as { code: string },
+    ]).toMatchObject([{ code: 'TOO_LARGE' }, { code: 'TOO_LARGE' }]);
+  });
+
+  it('should refuse an empty body', async () => {
+    const fetchImage = createImageFetcher({
+      fetch: async () =>
+        new Response(new Uint8Array(), { headers: { 'Content-Type': 'image/png' } }),
+    });
+
+    expect(await failureOf(fetchImage('t', IMAGE_URL))).toMatchObject({ code: 'BAD_RESPONSE' });
+  });
+
+  it('should carry the proxy error, and a network failure stays worth retrying', async () => {
+    const limited = createImageFetcher({
+      fetch: async () =>
+        Response.json({ error: { code: 'RATE_LIMITED', message: 'x' } }, { status: 429 }),
+    });
+    const gone = createImageFetcher({
+      fetch: async () =>
+        Response.json({ error: { code: 'UPSTREAM_ERROR', message: 'x' } }, { status: 502 }),
+    });
+    const offline = createImageFetcher({ fetch: () => Promise.reject(new TypeError('x')) });
+
+    expect([
+      await failureOf(limited('t', IMAGE_URL)),
+      await failureOf(gone('t', IMAGE_URL)),
+      await failureOf(offline('t', IMAGE_URL)),
+    ]).toEqual([
+      { code: 'RATE_LIMITED', status: 429, permanent: false },
+      { code: 'UPSTREAM_ERROR', status: 502, permanent: true },
+      { code: 'NETWORK_ERROR', status: null, permanent: false },
+    ]);
+  });
+
+  it('should fail with BAD_RESPONSE when the error is not the proxy envelope', async () => {
+    const fetchImage = createImageFetcher({
+      fetch: async () => new Response('<html>oops</html>', { status: 500 }),
+    });
+
+    expect(await failureOf(fetchImage('t', IMAGE_URL))).toMatchObject({
+      code: 'BAD_RESPONSE',
+      status: 500,
+    });
   });
 });

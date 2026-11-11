@@ -40,11 +40,14 @@
   const tab = $derived(app.homeTab);
   const title = $derived(TABS.find((entry) => entry.id === tab)?.label ?? 'Pendientes');
   const view = $derived(groupPending(app.items, app.categories));
-  // Items do not record when their status changed: newest saved first.
+  // Read and discarded: the most recently closed first. The saved date stands in for an item
+  // that never recorded a change.
   const closed = $derived(
     tab === 'pending'
       ? []
-      : app.items.filter((item) => item.status === tab).sort((a, b) => b.savedAt - a.savedAt),
+      : app.items
+          .filter((item) => item.status === tab)
+          .sort((a, b) => (b.statusChangedAt ?? b.savedAt) - (a.statusChangedAt ?? a.savedAt)),
   );
   const subtitle = $derived(
     app.loading ? 'Cargando…' : view.total === 0 ? 'Nada por leer' : `${view.total} por leer`,

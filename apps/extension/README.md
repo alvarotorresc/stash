@@ -9,6 +9,11 @@ Stash for the desktop browser: Chrome/Chromium and Firefox, both on Manifest V3,
   already exists says "Ya estaba guardado" and creates nothing.
 - **Context menu** ("Guardar en Stash") on any link: the page behind the link is not open, so only
   its address is saved and the proxy reads it later, when the popup opens.
+- **Thumbnails.** The popup shows each item's thumbnail with the same mapping as the PWA (a
+  `blob:` URL made when the item is decrypted and revoked on logout), and the color tone when it
+  has none. The background has no DOM, so it saves links without thumbnail: the popup creates them
+  on its next sync (at most 10 old items each time). The extension pages' CSP sets no `img-src`,
+  so `blob:` images load.
 
 ## Status
 

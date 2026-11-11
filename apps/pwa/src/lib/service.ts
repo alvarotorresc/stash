@@ -36,6 +36,8 @@ export interface Item {
   status: Status;
   /** Milliseconds since the epoch. */
   savedAt: number;
+  /** When it was last marked read, discarded or pending again (milliseconds); null if never. */
+  statusChangedAt: number | null;
   /** Saved offline, waiting to upload and to be read. */
   queued: boolean;
   thumbnail: { src?: string; tone: Tone };

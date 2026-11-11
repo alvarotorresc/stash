@@ -92,6 +92,9 @@ export const EXTRACT_IMAGE_TYPES = [
 
 export type ExtractImageType = (typeof EXTRACT_IMAGE_TYPES)[number];
 
+/** Largest image `POST /api/extract/image` hands back; the proxy refuses anything bigger. */
+export const EXTRACT_MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
 /** Error codes of both endpoints, inside `{ error: { code, message } }`. */
 export const EXTRACT_ERROR_CODES = [
   /** 400: body is not JSON, has no `url` string or is too long. */

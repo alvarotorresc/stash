@@ -301,6 +301,7 @@ export function createMockService(options: MockOptions = {}): StashService {
         tags: [],
         status: 'pending',
         savedAt: now(),
+        statusChangedAt: null,
         queued: !online,
         thumbnail: { tone: ((nextId % 4) + 1) as 1 | 2 | 3 | 4 },
         content: online
@@ -326,13 +327,16 @@ export function createMockService(options: MockOptions = {}): StashService {
       await wait();
       requireConnection();
       const item = find(id);
-      const before = item.status;
+      const before = { status: item.status, changedAt: item.statusChangedAt };
       item.status = status;
+      item.statusChangedAt = now();
       notify();
       return async () => {
         await wait();
         requireConnection();
-        find(id).status = before;
+        const again = find(id);
+        again.status = before.status;
+        again.statusChangedAt = before.changedAt;
         notify();
       };
     },

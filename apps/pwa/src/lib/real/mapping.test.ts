@@ -61,6 +61,23 @@ describe('originOf', () => {
   });
 });
 
+describe('toItem', () => {
+  it('should carry when the status last changed, null if it never did', () => {
+    expect([
+      toItem(view()).statusChangedAt,
+      toItem(view({ status: 'read', statusChangedAt: 5000 })).statusChangedAt,
+    ]).toEqual([null, 5000]);
+  });
+
+  it('should show the image when there is one and the tone when there is not', () => {
+    expect([
+      toItem(view(), 'blob:x').thumbnail.src,
+      toItem(view()).thumbnail.src,
+      toItem(view()).thumbnail.tone,
+    ]).toEqual(['blob:x', undefined, toneOf('item-1')]);
+  });
+});
+
 describe('safeHref', () => {
   it('should only let http(s) links become an href', () => {
     expect({
