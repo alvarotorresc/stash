@@ -47,6 +47,10 @@
     if (await app.markRead(id)) back();
   }
 
+  async function restore() {
+    if (await app.restore(id)) back();
+  }
+
   async function discard() {
     if (await app.discard(id)) back();
   }
@@ -71,6 +75,8 @@
     onclassify={() => app.openSheet({ variant: 'classify', itemId: id })}
     ondiscard={discard}
     onmarkread={markRead}
+    status={item.status}
+    onrestore={restore}
   >
     {#if content?.kind === 'article'}
       <ArticleContent
