@@ -234,3 +234,32 @@ describe('Saving and reading on the real service', () => {
     expect(saved?.title).toBe('just setting up my twttr');
   });
 });
+
+describe('Thumbnails on the real service', () => {
+  it('should show the decrypted thumbnail in the list and in the reading view', async () => {
+    const backend = new FakeBackend();
+    const image = 'https://cdn.example.com/cover.jpg';
+    backend.pages.set(ARTICLE, webPage(ARTICLE, 'La despensa', ['Garbanzos con calabaza.'], image));
+    backend.images.set(image, { type: 'image/jpeg', bytes: new Uint8Array([0xff, 0xd8, 0xff, 1]) });
+    const make = async () => ({ type: 'image/webp' as const, bytes: new Uint8Array([1, 2, 3]) });
+    const device = realDevice(backend, undefined, make);
+    devices.push(device);
+    await device.service.register(EMAIL, PASSWORD);
+    await device.service.save(ARTICLE);
+    await device.stash.idle();
+
+    await renderRealApp('#/', device);
+    const row = await screen.findByRole('button', { name: /La despensa/ });
+    const inList = within(row).getByRole('presentation', { hidden: true });
+    await fireEvent.click(row);
+    await screen.findByRole('button', { name: 'Marcar leído' });
+
+    expect({
+      list: inList.getAttribute('src')?.startsWith('blob:'),
+      reading: document.querySelectorAll('img[src^="blob:"]').length > 0,
+      thirdParty: [...document.querySelectorAll('img')].some((img) =>
+        (img.getAttribute('src') ?? '').includes('cdn.example.com'),
+      ),
+    }).toEqual({ list: true, reading: true, thirdParty: false });
+  });
+});

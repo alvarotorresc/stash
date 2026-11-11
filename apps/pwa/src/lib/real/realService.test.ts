@@ -1,5 +1,6 @@
+import type { Stash } from '@stash/client';
 import { FakeBackend, webPage } from '@stash/client/testing';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { realDevice } from '../../test-utils';
 import { AccountError, ChangeError, type StashService } from '../service';
 import { passwordStrength } from './realService';
@@ -344,6 +345,65 @@ describe('createRealService', () => {
     });
   });
 
+  describe('thumbnail object URLs', () => {
+    async function withThumbnail(url: string, service: StashService, stash: Stash) {
+      const saved = await service.save(url);
+      await stash.idle();
+      await stash.change((sync) =>
+        sync.setReadResult(saved.id, {
+          preview: null,
+          content: null,
+          thumbnail: { type: 'image/webp', bytes: new Uint8Array([1, 2, 3]) },
+        }),
+      );
+      return saved.id;
+    }
+
+    function spyOnUrls() {
+      let count = 0;
+      const revoked: string[] = [];
+      vi.spyOn(URL, 'createObjectURL').mockImplementation(() => `blob:test/${++count}`);
+      vi.spyOn(URL, 'revokeObjectURL').mockImplementation((url) => void revoked.push(url));
+      return revoked;
+    }
+
+    afterEach(() => vi.restoreAllMocks());
+
+    it('should revoke them when the session ends', async () => {
+      const { service, stash } = await signedUp();
+      await withThumbnail(URL_A, service, stash);
+      const revoked = spyOnUrls();
+      await service.listItems();
+
+      await service.logout();
+
+      expect(revoked).toEqual(['blob:test/1']);
+    });
+
+    it('should revoke the one of an item that was deleted', async () => {
+      const { service, stash } = await signedUp();
+      const id = await withThumbnail(URL_A, service, stash);
+      const revoked = spyOnUrls();
+      await service.listItems();
+
+      await stash.change((sync) => sync.deleteItem(id));
+      await service.listItems();
+
+      expect(revoked).toEqual(['blob:test/1']);
+    });
+
+    it('should not touch the image of an item that stays', async () => {
+      const { service, stash } = await signedUp();
+      await withThumbnail(URL_A, service, stash);
+      const revoked = spyOnUrls();
+
+      await service.listItems();
+      await service.listItems();
+
+      expect(revoked).toEqual([]);
+    });
+  });
+
   describe('categories and tags', () => {
     it('should create, reuse, rename, reorder and delete categories', async () => {
       const { service } = await signedUp();
@@ -405,6 +465,29 @@ describe('createRealService', () => {
         text: true,
         categories: ['Casa'],
         tags: ['cena'],
+      });
+    });
+
+    it('should export the thumbnail as base64, and null when there is none', async () => {
+      const { service, stash } = await signedUp();
+      const saved = await service.save(URL_A);
+      await service.save(URL_B);
+      await stash.idle();
+      await stash.change((sync) =>
+        sync.setReadResult(saved.id, {
+          preview: null,
+          content: null,
+          thumbnail: { type: 'image/webp', bytes: new Uint8Array([1, 2, 3, 250]) },
+        }),
+      );
+
+      const data = JSON.parse(await (await service.exportAll()).text()) as {
+        items: { url: string; thumbnail: { type: string; base64: string } | null }[];
+      };
+
+      expect(Object.fromEntries(data.items.map((item) => [item.url, item.thumbnail]))).toEqual({
+        [URL_A]: { type: 'image/webp', base64: btoa(String.fromCharCode(1, 2, 3, 250)) },
+        [URL_B]: null,
       });
     });
 

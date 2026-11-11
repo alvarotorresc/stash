@@ -33,6 +33,7 @@ export function seedItems(now: number): ItemDetail[] {
       tags: [],
       status: 'pending',
       savedAt: at(2),
+      statusChangedAt: null,
       queued: false,
       thumbnail: { tone: 2 },
       content: {
@@ -55,6 +56,7 @@ export function seedItems(now: number): ItemDetail[] {
       tags: ['despensa'],
       status: 'pending',
       savedAt: at(20),
+      statusChangedAt: null,
       queued: false,
       thumbnail: { tone: 1 },
       content: {
@@ -78,6 +80,7 @@ export function seedItems(now: number): ItemDetail[] {
       tags: [],
       status: 'pending',
       savedAt: at(30),
+      statusChangedAt: null,
       queued: false,
       thumbnail: { tone: 3 },
       content: {
@@ -100,6 +103,7 @@ export function seedItems(now: number): ItemDetail[] {
       tags: ['atajos'],
       status: 'pending',
       savedAt: at(26),
+      statusChangedAt: null,
       queued: false,
       thumbnail: { tone: 3 },
       content: {
@@ -123,6 +127,7 @@ export function seedItems(now: number): ItemDetail[] {
       tags: ['otoño', 'cena'],
       status: 'pending',
       savedAt: at(4),
+      statusChangedAt: null,
       queued: false,
       thumbnail: { tone: 4 },
       content: {
@@ -142,6 +147,7 @@ export function seedItems(now: number): ItemDetail[] {
       tags: [],
       status: 'pending',
       savedAt: at(50),
+      statusChangedAt: null,
       queued: false,
       thumbnail: { tone: 3 },
       content: {
@@ -164,6 +170,7 @@ export function seedItems(now: number): ItemDetail[] {
       tags: [],
       status: 'pending',
       savedAt: at(70),
+      statusChangedAt: null,
       queued: false,
       thumbnail: { tone: 2 },
       content: {
@@ -185,6 +192,7 @@ export function seedItems(now: number): ItemDetail[] {
       tags: [],
       status: 'pending',
       savedAt: at(90),
+      statusChangedAt: null,
       queued: false,
       thumbnail: { tone: 1 },
       content: {
@@ -204,6 +212,7 @@ export function seedItems(now: number): ItemDetail[] {
       tags: ['cena'],
       status: 'read',
       savedAt: at(200),
+      statusChangedAt: at(150),
       queued: false,
       thumbnail: { tone: 4 },
       content: {
@@ -223,6 +232,7 @@ export function seedItems(now: number): ItemDetail[] {
       tags: [],
       status: 'pending',
       savedAt: at(0.5),
+      statusChangedAt: null,
       queued: true,
       thumbnail: { tone: 2 },
       content: { kind: 'none' },

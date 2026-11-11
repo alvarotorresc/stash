@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
-import { renderApp } from '../test-utils';
+import { NOW, renderApp } from '../test-utils';
 
 describe('Home', () => {
   it('should list pending items by priority with the unsorted strip first', async () => {
@@ -142,19 +142,52 @@ describe('Home tabs', () => {
     expect(screen.queryByRole('button', { name: /Pan de masa madre/ })).toBeNull();
   });
 
-  it('should order read items from the newest saved to the oldest', async () => {
-    const { service } = await renderApp();
-    await service.setStatus('item-despensa', 'read'); // saved 20h ago
-    await service.setStatus('item-calabaza', 'read'); // saved 4h ago
+  it('should order read items by when they were marked, newest first, not by when they were saved', async () => {
+    let clock = NOW;
+    const { service } = await renderApp('#/', { now: () => (clock += 60_000) });
+    await service.setStatus('item-calabaza', 'read'); // saved 4h ago, closed first
+    await service.setStatus('item-despensa', 'read'); // saved 20h ago, closed last
 
     await fireEvent.click(tab('Leídos'));
 
     const titles = (await screen.findAllByRole('button', { name: /Pan|despensa|calabaza/ })).map(
       (button) => button.textContent ?? '',
     );
-    expect(titles[0]).toMatch(/calabaza/);
-    expect(titles[1]).toMatch(/despensa/);
+    expect(titles[0]).toMatch(/despensa/);
+    expect(titles[1]).toMatch(/calabaza/);
     expect(titles[2]).toMatch(/Pan de masa madre/);
+  });
+
+  it('should order discarded items by when they were discarded, too', async () => {
+    let clock = NOW;
+    const { service } = await renderApp('#/', { now: () => (clock += 60_000) });
+    await service.setStatus('item-abono', 'discarded'); // saved 30h ago
+    await service.setStatus('item-cola', 'discarded'); // saved 30 minutes ago
+    await service.setStatus('item-vscode', 'discarded'); // saved 26h ago, discarded last
+
+    await fireEvent.click(tab('Descartados'));
+
+    const titles = (
+      await screen.findAllByRole('button', { name: /abono|VS Code|mercadillos/i })
+    ).map((button) => button.textContent ?? '');
+    expect(titles[0]).toMatch(/VS Code/);
+    expect(titles[1]).toMatch(/mercadillos/);
+    expect(titles[2]).toMatch(/abono/);
+  });
+
+  it('should fall back to the saved date for an item that never recorded a change', async () => {
+    const { service, app } = await renderApp();
+    expect(app.item('item-pan')?.statusChangedAt).not.toBeNull();
+    await service.setStatus('item-despensa', 'read');
+
+    await fireEvent.click(tab('Leídos'));
+    await screen.findByRole('button', { name: /despensa/ });
+
+    const titles = screen
+      .getAllByRole('button', { name: /Pan|despensa/ })
+      .map((button) => button.textContent ?? '');
+    // The mock marks it at NOW: newer than the seeded read item.
+    expect(titles[0]).toMatch(/despensa/);
   });
 
   it('should keep the header count about pending items on every tab', async () => {
