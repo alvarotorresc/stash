@@ -1,6 +1,6 @@
 import type { ExtractData, FetchedDocument } from '@stash/core/extract';
 import { describe, expect, it } from 'vitest';
-import { readExtract, unreadableLink } from './read';
+import { readExtract, readHtml, unreadableLink } from './read';
 import { webPage } from './test/backend';
 
 function doc(url: string, body: string, contentType = 'text/html'): FetchedDocument {
@@ -163,6 +163,22 @@ describe('readExtract', () => {
     const broken = { kind: 'web', page: { body: 42 } } as unknown as ExtractData;
 
     expect(readExtract(broken, url)).toEqual(unreadableLink(url));
+  });
+});
+
+describe('readHtml', () => {
+  it('should read the HTML of an open tab like a page from the proxy', () => {
+    const url = 'https://blog.example.com/post';
+    const data = webPage(url, 'La despensa', ['uno dos tres '.repeat(30)]);
+    const html = data.kind === 'web' ? data.page.body : '';
+
+    expect(readHtml(html, url)).toEqual(readExtract(data, url));
+  });
+
+  it('should degrade to the bare link when the HTML cannot be read', () => {
+    const url = 'https://example.com/';
+
+    expect(readHtml(42 as unknown as string, url)).toEqual(unreadableLink(url));
   });
 });
 

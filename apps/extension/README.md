@@ -3,19 +3,54 @@
 Stash for the desktop browser: Chrome/Chromium and Firefox, both on Manifest V3, built with
 [WXT](https://wxt.dev) and Svelte.
 
-- **Popup**: saves the open tab and lets you classify it. It reads the page directly from the tab
-  (address, title, meta tags and HTML for reader mode on the device).
+- **Popup**: logs in, saves the open tab and lets you classify it, and lists and reads what is
+  saved. It reads the page directly from the tab (address, title, meta tags and HTML) and turns
+  the HTML into reader mode on the device, so the proxy is not asked for it. Saving a link that
+  already exists says "Ya estaba guardado" and creates nothing.
 - **Context menu** ("Guardar en Stash") on any link: the page behind the link is not open, so only
-  its address is saved and the service extracts it through the proxy.
+  its address is saved and the proxy reads it later, when the popup opens.
 
 ## Status
 
-Accounts, unlock and sync are not wired yet. The popup and the background use the in-memory
-example service (`lib/mock.ts`); only reading the open tab is real. `lib/services.ts` is the one
-place where the service is picked: the real client goes there and nothing else changes.
+Wired to the real client (`@stash/client`, the same one the PWA uses): login, unlock, encrypted
+sync, extraction and the reader. The account is the PWA's: same email, same drawer.
 
-The popup and the background run in separate contexts and each creates its own service. With the
-mock they do not share state, so a link saved from the context menu does not show up in the popup.
+**Creating the account** is done in the web app: the popup links to it. The recovery code is shown
+once, and a popup closes as soon as it loses focus, so it could be lost while the account already
+exists. Logging in, unlocking and saving all work in the popup.
+
+## How the contexts work
+
+The popup and the background run separately and each creates its own client (`lib/services.ts`).
+They share the session in `storage.local` and the data key and encrypted cache in the extension's
+own IndexedDB, never memory.
+
+- **Argon2id runs in the popup** (a module Web Worker bundled as an extension file), never in the
+  background: Chrome's service worker has no Web Workers and can stop at any time.
+- **Session**: the Bearer token and the email, in `storage.local` (`lib/storage.ts`). Only the
+  extension's pages and background can read it. A record that does not look like a session is
+  deleted when read.
+- **Data key**: the client's non-extractable `CryptoKey` in the extension's IndexedDB, valid 30
+  days from the last password entry, like the PWA.
+- **Requests** go to `https://stash.alvarotc.com` with `credentials: 'omit'` and a Bearer token.
+  The API sees the extension's own origin (see its README for the exception).
+- **Log out** closes the session on the server and clears the token, the data key, the encrypted
+  cache, the offline queue and the links waiting from the menu.
+
+### Context menu without an unlocked session
+
+Each click makes a fresh client and checks the session first, so a log out in the popup takes
+effect at once (a long-lived background would keep the data key in memory).
+
+- **Unlocked**: the link is saved with the real client, without reading it (the background has no
+  DOM). If it cannot be saved right away it is queued in the encrypted queue like any save.
+- **Not logged in, expired, logged out, or saving threw**: the address goes to a small list in
+  `storage.local` (50 links at most, no repeats, http(s) only) and the toolbar button shows how
+  many wait. Opening the popup and unlocking saves them one by one and removes each only after it
+  is saved; a failure leaves the rest for next time.
+
+Those waiting addresses are plain text in the profile until saved: there is no key to encrypt
+them with while locked. Logging out deletes them.
 
 ## Layout
 
@@ -27,8 +62,11 @@ mock they do not share state, so a link saved from the context menu does not sho
 | `lib/messages.ts`           | Message types, their parser and the sender check.                    |
 | `lib/router.ts`             | One handler for every message, and the `runtime.onMessage` listener. |
 | `lib/contextMenu.ts`        | "Guardar en Stash" on links; a click becomes a save-link message.    |
-| `lib/services.ts`           | Injection point for the Stash service (mock today).                  |
-| `lib/service.ts`, `mock.ts` | The service interface and the in-memory example.                     |
+| `lib/services.ts`           | Builds the popup's service and the background's actions.             |
+| `lib/popupService.ts`       | The popup's service over `@stash/client`.                            |
+| `lib/client.ts`             | The client for an extension context: API origin, no cookies.         |
+| `lib/storage.ts`            | `SessionStore` over `storage.local`, and the links waiting.          |
+| `lib/service.ts`, `mock.ts` | The service interface and the in-memory example (component tests).   |
 
 ## Commands
 
@@ -65,9 +103,9 @@ pnpm --filter @stash/extension test         # tests with coverage
 1. `pnpm --filter @stash/extension build:firefox`.
 2. Open `about:debugging#/runtime/this-firefox` and click **Load Temporary Add-on…**.
 3. Pick `apps/extension/.output/firefox-mv3/manifest.json`. It stays until Firefox closes.
-4. In Manifest V3, Firefox treats host permissions as optional: if calls to the API fail once
-   they exist, check that `stash.alvarotc.com` is allowed under `about:addons` → Stash →
-   Permissions (to verify when the real client is wired).
+4. In Manifest V3, Firefox may treat host permissions as optional: logging in asks for the Stash
+   host first (no new permission, it is the declared one). If calls to the API still fail, check
+   that `stash.alvarotc.com` is allowed under `about:addons` → Stash → Permissions.
 
 Release Firefox only installs signed add-ons; for daily use without the store, sign the Firefox
 zip as an unlisted add-on on AMO.
@@ -95,8 +133,8 @@ the sources are unpacked.
 | `activeTab`                           | Read the open tab only after the user clicks the toolbar button. No standing access. |
 | `scripting`                           | Run the one function that reads that tab (`capturePage` in `lib/tab.ts`).            |
 | `contextMenus`                        | "Guardar en Stash" on links.                                                         |
-| `storage`                             | Session and settings, once accounts are wired.                                       |
-| `https://stash.alvarotc.com/*` (host) | The Stash API. The only host the extension talks to.                                 |
+| `storage`                             | The session token, and the links picked from the menu while locked.                  |
+| `https://stash.alvarotc.com/*` (host) | The Stash API. The only host the extension talks to. Used for every request.         |
 
 There is no `<all_urls>`, no content script and no access to other sites: a link saved from the
 context menu is fetched by the proxy, not by the extension.
@@ -127,18 +165,25 @@ menu go through the proxy.
   pages cannot message the extension. Failures answer `{ ok: false }` without details.
 - **Context menu.** A click goes through the same parser and handler as a message from the popup.
   Only http(s) links are saved; `javascript:`, `data:` and `file:` links are ignored.
+- **Token and key.** The token is in `storage.local`: readable by the extension's own code, not
+  by web pages or other extensions, and not encrypted at rest (like the PWA's `localStorage`).
+  The data key is non-extractable and, as the core documents, not encrypted on disk either. The
+  popup and the background load no remote code (`script-src 'self' 'wasm-unsafe-eval'`) and
+  sanitize every saved page before showing it (`sanitizeStoredHtml`, images never load), so the
+  defence is that no foreign script runs in the extension's pages.
+- **Reading pages.** The HTML read from the tab is parsed on the device by the reader (Readability
+  and DOMPurify) in the popup; it never reaches `innerHTML` unsanitized.
+- **Requests.** `credentials: 'omit'` and a Bearer token: no cookie travels, so nothing rides on
+  the browser's ambient credentials.
+- **Permissions.** Logging in calls `permissions.request` for the host that is already declared;
+  it needs the click and shows no prompt when the permission is granted.
 
 ## API: requests from the extension
 
-The API refuses any `/api/*` request marked `Sec-Fetch-Site: cross-site` (403
-`CROSS_SITE_REQUEST`), because it only serves the PWA on its own origin. The extension calls it
-from its own origin (`chrome-extension://<id>` or `moz-extension://<uuid>`), so when the real
-client is wired the API needs an exception for those requests. Not implemented here; to settle
-then:
+The API refuses `/api/*` requests marked `Sec-Fetch-Site: cross-site`, except those whose `Origin`
+is exactly `chrome-extension://<32 letters>` or `moz-extension://<uuid>`. The reasoning (the API
+uses no cookies; a page cannot forge `Origin`) is in `apps/api/README.md`. The Chrome id is not
+pinned there because Firefox's UUID is random per installation.
 
-- Which `Sec-Fetch-Site` and `Origin` each browser sends for an extension request to a host it has
-  permission for is not verified. It has to be checked in Chrome and in Firefox.
-- The `moz-extension://` origin changes with every Firefox install, so an allowlist of origins
-  cannot be the defense. The real defense is the Bearer token; the exception should match the
-  extension schemes, not fixed ids.
-- CORS keeps allowing only the PWA origin unless the checks above show the extension needs it.
+To verify with the packaged extension: which `Sec-Fetch-Site` each browser sends for these
+requests, and (Firefox) whether the host permission is granted at install.

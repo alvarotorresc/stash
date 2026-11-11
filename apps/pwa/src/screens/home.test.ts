@@ -108,3 +108,123 @@ describe('Home', () => {
     expect(await screen.findByRole('heading', { level: 1, name: 'Pendientes' })).toBeTruthy();
   });
 });
+
+describe('Home tabs', () => {
+  const tab = (name: string) => screen.getByRole('tab', { name });
+
+  it('should show the three tabs with Pendientes selected', async () => {
+    await renderApp();
+
+    expect(screen.getByRole('tablist', { name: 'Estado' })).toBeTruthy();
+    expect(tab('Pendientes').getAttribute('aria-selected')).toBe('true');
+    expect(tab('Leídos').getAttribute('aria-selected')).toBe('false');
+    expect(tab('Descartados').getAttribute('aria-selected')).toBe('false');
+    expect(screen.getByRole('tabpanel')).toBeTruthy();
+  });
+
+  it('should list read items under Leídos and hide pending ones', async () => {
+    await renderApp();
+
+    await fireEvent.click(tab('Leídos'));
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Leídos' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Pan de masa madre/ })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /organizar la despensa/ })).toBeNull();
+  });
+
+  it('should list discarded items under Descartados', async () => {
+    const { service } = await renderApp();
+    await service.setStatus('item-abono', 'discarded');
+
+    await fireEvent.click(tab('Descartados'));
+
+    expect(await screen.findByRole('button', { name: /abono transporte/ })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Pan de masa madre/ })).toBeNull();
+  });
+
+  it('should order read items from the newest saved to the oldest', async () => {
+    const { service } = await renderApp();
+    await service.setStatus('item-despensa', 'read'); // saved 20h ago
+    await service.setStatus('item-calabaza', 'read'); // saved 4h ago
+
+    await fireEvent.click(tab('Leídos'));
+
+    const titles = (await screen.findAllByRole('button', { name: /Pan|despensa|calabaza/ })).map(
+      (button) => button.textContent ?? '',
+    );
+    expect(titles[0]).toMatch(/calabaza/);
+    expect(titles[1]).toMatch(/despensa/);
+    expect(titles[2]).toMatch(/Pan de masa madre/);
+  });
+
+  it('should keep the header count about pending items on every tab', async () => {
+    await renderApp();
+
+    await fireEvent.click(tab('Leídos'));
+
+    expect(screen.getByText('9 por leer')).toBeTruthy();
+  });
+
+  it('should say nothing was discarded when Descartados is empty', async () => {
+    await renderApp();
+
+    await fireEvent.click(tab('Descartados'));
+
+    expect(screen.getByText('No has descartado nada')).toBeTruthy();
+  });
+
+  it('should say nothing was read when Leídos is empty', async () => {
+    const { service } = await renderApp();
+    await service.setStatus('item-pan', 'pending');
+
+    await fireEvent.click(tab('Leídos'));
+
+    expect(await screen.findByText('Aún no has leído nada')).toBeTruthy();
+  });
+
+  it('should switch tabs with the arrow keys', async () => {
+    await renderApp();
+
+    await fireEvent.keyDown(tab('Pendientes'), { key: 'ArrowRight' });
+
+    expect(tab('Leídos').getAttribute('aria-selected')).toBe('true');
+    expect(document.activeElement).toBe(tab('Leídos'));
+  });
+
+  it('should remember the tab when coming back from an item', async () => {
+    const { app } = await renderApp();
+    await fireEvent.click(tab('Leídos'));
+
+    await fireEvent.click(screen.getByRole('button', { name: /Pan de masa madre/ }));
+    await screen.findByRole('button', { name: 'Volver a pendientes' });
+    app.router.back();
+
+    expect(await screen.findByRole('tab', { name: 'Leídos' })).toBeTruthy();
+    expect(tab('Leídos').getAttribute('aria-selected')).toBe('true');
+  });
+
+  it('should send a read item back to pending with undo', async () => {
+    const { app } = await renderApp();
+    await fireEvent.click(tab('Leídos'));
+    await fireEvent.click(screen.getByRole('button', { name: /Pan de masa madre/ }));
+
+    await fireEvent.click(await screen.findByRole('button', { name: 'Volver a pendientes' }));
+
+    await waitFor(() => expect(app.item('item-pan')?.status).toBe('pending'));
+    expect(await screen.findByText('Vuelto a pendientes')).toBeTruthy();
+    await fireEvent.click(screen.getByRole('button', { name: 'Deshacer' }));
+    await waitFor(() => expect(app.item('item-pan')?.status).toBe('read'));
+  });
+
+  it('should offer to mark read a discarded item', async () => {
+    const { app, service } = await renderApp();
+    await service.setStatus('item-abono', 'discarded');
+    await fireEvent.click(tab('Descartados'));
+    await fireEvent.click(await screen.findByRole('button', { name: /abono transporte/ }));
+
+    expect(await screen.findByRole('button', { name: 'Volver a pendientes' })).toBeTruthy();
+    await fireEvent.click(screen.getByRole('button', { name: 'Marcar leído' }));
+
+    await waitFor(() => expect(app.item('item-abono')?.status).toBe('read'));
+  });
+});

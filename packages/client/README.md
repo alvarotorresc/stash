@@ -21,16 +21,16 @@ await stash.change((sync) => sync.classify(id, { priority: 'high' }));
 stash.sync.listItems(); // reads go straight to the sync client
 ```
 
-| Method                                        | What it does                                                                         |
-| --------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `session()`                                   | The session when the data key is unlocked too; `null` means "ask for the password".  |
-| `lastEmail()`                                 | The email of the last session on the device, also once expired.                      |
-| `register` / `login` / `recover`              | Password entries. `register` and `recover` return a recovery code to show once.      |
-| `changePassword` / `logout` / `deleteAccount` | Logout and deletion forget the data key, the cache and the queue.                    |
-| `start()` / `refresh()`                       | Load the cache (offline too) / upload the queue, pull and read unread links.         |
-| `save(url)`                                   | Saves at once and reads the page in the background.                                  |
-| `change(run)`                                 | Runs a change through the sync client, one at a time.                                |
-| `subscribe` / `isOnline` / `idle` / `dispose` | Change notifications, connection, pending background work, stop listening to events. |
+| Method                                        | What it does                                                                          |
+| --------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `session()`                                   | The session when the data key is unlocked too; `null` means "ask for the password".   |
+| `lastEmail()`                                 | The email of the last session on the device, also once expired.                       |
+| `register` / `login` / `recover`              | Password entries. `register` and `recover` return a recovery code to show once.       |
+| `changePassword` / `logout` / `deleteAccount` | Logout and deletion forget the data key, the cache and the queue.                     |
+| `start()` / `refresh()`                       | Load the cache (offline too) / upload the queue, pull and read unread links.          |
+| `save(url, { read }?)`                        | Saves at once and reads the page in the background, or stores the `read` it is given. |
+| `change(run)`                                 | Runs a change through the sync client, one at a time.                                 |
+| `subscribe` / `isOnline` / `idle` / `dispose` | Change notifications, connection, pending background work, stop listening to events.  |
 
 ## Behaviour
 
@@ -48,6 +48,8 @@ stash.sync.listItems(); // reads go straight to the sync client
   session: the app goes back to the login with the email filled in, and the queue uploads after
   the next login of the same account. Signing in with another account wipes the local data
   first.
+- **Pages already read.** The extension reads the open tab itself: `readHtml` turns its HTML into
+  a `ReadResult` and `save(url, { read })` stores it with the link, with no call to the proxy.
 - **No DOM, no reading.** Where `DOMParser` is missing (the extension's background) links are
   saved without reading; a context with a DOM reads them on its next `refresh`.
 

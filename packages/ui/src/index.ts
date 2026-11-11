@@ -18,6 +18,7 @@ export { default as Highlight } from './Highlight.svelte';
 export { rowExit, toastMotion } from './transitions';
 
 export { default as PrioritySegment } from './PrioritySegment.svelte';
+export { default as SegmentedTabs } from './SegmentedTabs.svelte';
 export { default as Chip } from './Chip.svelte';
 export { default as CategoryPicker } from './CategoryPicker.svelte';
 export { default as Tag } from './Tag.svelte';

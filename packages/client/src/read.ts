@@ -57,6 +57,18 @@ export function readExtract(data: ExtractData, url: string): ReadResult {
   }
 }
 
+/**
+ * Reads the HTML of a page the user has open (the extension reads it from the tab), the same way
+ * as a page the proxy downloaded. It never throws: unreadable HTML degrades to the bare link.
+ */
+export function readHtml(html: string, url: string): ReadResult {
+  try {
+    return toReadResult(parsePage(html, url));
+  } catch {
+    return toReadResult(minimalResult(url));
+  }
+}
+
 /** What is kept when the page cannot be read at all: the link, with an empty preview. */
 export function unreadableLink(url: string): ReadResult {
   return toReadResult(minimalResult(url));
