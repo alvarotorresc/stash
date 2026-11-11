@@ -105,3 +105,65 @@ describe('cross-site requests', () => {
     expect(res.status).toBe(200);
   });
 });
+
+describe('requests from the browser extension', () => {
+  const CHROME = `chrome-extension://${'a'.repeat(32)}`;
+  const FIREFOX = 'moz-extension://3f2b8c1e-9d4a-4e6b-8a57-0c1d2e3f4a5b';
+
+  it.each([
+    ['Chrome', CHROME],
+    ['Firefox', FIREFOX],
+  ])('should let a cross-site request from the %s extension through', async (_, origin) => {
+    const res = await call(API_PATHS.prelogin, {
+      headers: { 'Sec-Fetch-Site': 'cross-site', Origin: origin },
+      body: { email: uniqueEmail() },
+    });
+
+    expect(res.status).toBe(200);
+  });
+
+  it('should let an authenticated cross-site request from the extension reach its route', async () => {
+    const { token } = await register();
+
+    const res = await call(API_PATHS.account, {
+      token,
+      headers: { 'Sec-Fetch-Site': 'cross-site', Origin: CHROME },
+    });
+
+    expect(res.status).not.toBe(403);
+  });
+
+  it('should still refuse a web page cross-site, whatever else it sends', async () => {
+    const res = await call(API_PATHS.prelogin, {
+      headers: { 'Sec-Fetch-Site': 'cross-site', Origin: 'https://evil.example' },
+      body: { email: uniqueEmail() },
+    });
+
+    expect(await errorOf(res)).toEqual({ status: 403, code: 'CROSS_SITE_REQUEST' });
+  });
+
+  it.each([
+    ['a short Chrome id', 'chrome-extension://abc'],
+    ['capital letters in the Chrome id', `chrome-extension://${'A'.repeat(32)}`],
+    ['a Chrome id followed by a host', `${CHROME}.evil.example`],
+    ['a Chrome origin with a path', `${CHROME}/page.html`],
+    ['a Firefox origin that is not a UUID', 'moz-extension://notauuid'],
+    ['a Firefox origin followed by a host', `${FIREFOX}.evil.example`],
+    ['another extension scheme', `safari-web-extension://${'a'.repeat(32)}`],
+    ['the opaque origin', 'null'],
+    ['an empty origin', ''],
+  ])('should refuse a cross-site request with %s', async (_, origin) => {
+    const res = await call(API_PATHS.prelogin, {
+      headers: { 'Sec-Fetch-Site': 'cross-site', Origin: origin },
+      body: { email: uniqueEmail() },
+    });
+
+    expect(await errorOf(res)).toEqual({ status: 403, code: 'CROSS_SITE_REQUEST' });
+  });
+
+  it('should still let a request with no Origin through, as before', async () => {
+    const res = await call(API_PATHS.prelogin, { body: { email: uniqueEmail() } });
+
+    expect(res.status).toBe(200);
+  });
+});

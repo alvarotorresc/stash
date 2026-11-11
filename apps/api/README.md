@@ -78,9 +78,36 @@ origin cannot send a request a browser would preflight. Two checks close what is
 - Any `/api/*` request with `Sec-Fetch-Site: cross-site` answers 403 `CROSS_SITE_REQUEST`.
   Clients that are not browsers do not send the header and go through.
 
-The browser extension will call the API from its own origin. When it arrives, it needs an
-explicit exception for that origin (CORS limited to it, and the cross-site check allowing it);
-the bearer token stays the real defence.
+#### The browser extension
+
+The extension calls the API from its own origin and carries a Bearer token, so one exception
+lets it through: a request marked `cross-site` is accepted when its `Origin` is exactly
+`chrome-extension://<32 letters a-p>` or `moz-extension://<UUID>`. Any other origin, a lookalike
+(`chrome-extension://<id>.evil.example`, a path, another scheme) or the opaque `null` still gets 403.
+
+Why this is safe:
+
+- **The API uses no cookies.** Nothing authenticates a request by itself: every route that
+  needs a session reads a Bearer token from `Authorization`, which a page on another site can
+  neither read nor attach. That is why a cross-site request could never act as the user (CSRF
+  does not apply); what the check closes is abuse, such as spreading unauthenticated requests
+  over the IPs of another site's visitors. The extension sends `credentials: 'omit'`, so no
+  cookie travels with its requests either.
+- **A page cannot forge the origin.** `Origin` is a forbidden header name: only the browser
+  sets it, and extension schemes belong to installed extensions, not to web content.
+- **An extension of another author** with access to this host could send the same origin shape.
+  It could equally call the API with any token it obtained, so the exception adds nothing to
+  what the Bearer token already guards, and the rate limits still apply.
+- **The Chrome id is not pinned**, because Firefox's UUID is random per installation and cannot
+  be (the exception has to accept that shape anyway), so pinning one of the two would add no
+  protection. The real defences are the Bearer token, the JSON-only body rule and the rate
+  limits above.
+- **No CORS headers are added.** Extension requests to a host in the extension's
+  `host_permissions` are not subject to CORS, and the `OPTIONS` preflight stays 405.
+
+Not verified: which `Sec-Fetch-Site` value each browser sends for these requests (it may be
+`cross-site`, `same-site` or `none`). The exception covers `cross-site`; the other values passed
+before. Check it with the packaged extension in Chrome and in Firefox.
 
 ## Rate limiting
 

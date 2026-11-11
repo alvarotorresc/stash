@@ -25,7 +25,8 @@ export default defineConfig({
     description: 'One ordered drawer for everything you save for later.',
     // activeTab: read the open tab only when the popup is opened (the user's click grants it).
     // scripting: inject the one function that reads that tab; MV3 has no other way.
-    // contextMenus: "Guardar en Stash" on links. storage: session and settings.
+    // contextMenus: "Guardar en Stash" on links. storage: the session token and the links waiting
+    // for it.
     // No <all_urls> and no content scripts: a link saved from the menu goes through the proxy.
     permissions: ['activeTab', 'scripting', 'contextMenus', 'storage'],
     host_permissions: [API_HOST],
@@ -59,7 +60,9 @@ export default defineConfig({
       'tsconfig.base.json',
       'LICENSE',
       'apps/extension/**',
+      'packages/client/**',
       'packages/core/**',
+      'packages/reader/**',
       'packages/ui/**',
     ],
     excludeSources: [
