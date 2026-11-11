@@ -5,7 +5,11 @@
  * even in errors. The URL travels in the JSON body, never in the query string.
  */
 
-import { EXTRACT_MAX_URL_LENGTH, type ExtractErrorCode } from '@stash/core/extract';
+import {
+  EXTRACT_MAX_IMAGE_BYTES,
+  EXTRACT_MAX_URL_LENGTH,
+  type ExtractErrorCode,
+} from '@stash/core/extract';
 import { requireSession, type Session, type SessionResolver } from '../auth/session';
 import { jsonData, jsonError } from '../http';
 import type { RateLimiter } from '../rate-limit';
@@ -27,7 +31,7 @@ export interface ExtractLimits extends DocumentLimits {
 export const DEFAULT_LIMITS: ExtractLimits = {
   maxDocumentBytes: 2 * 1024 * 1024,
   maxJsonBytes: 256 * 1024,
-  maxImageBytes: 5 * 1024 * 1024,
+  maxImageBytes: EXTRACT_MAX_IMAGE_BYTES,
   maxRedirects: 5,
   timeoutMs: 10_000,
 };
