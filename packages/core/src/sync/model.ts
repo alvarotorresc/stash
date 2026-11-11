@@ -48,6 +48,11 @@ export interface Thumbnail {
 export interface Item {
   readonly id: string;
   readonly url: string;
+  /**
+   * The link the page really lives at, when reading it showed another one (a TikTok short link
+   * leads to the video's own address). Only for recognizing the same link saved again.
+   */
+  readonly canonicalUrl?: string;
   readonly source: Source;
   /** Null until the link has been read (for example while it waits in the offline queue). */
   readonly preview: ItemPreview | null;
@@ -213,6 +218,7 @@ export function parseItem(id: string, json: Json, thumbnail: Thumbnail | null): 
   return {
     id,
     url: str(json.url),
+    ...(json.canonicalUrl == null ? {} : { canonicalUrl: str(json.canonicalUrl) }),
     source: oneOf(SOURCES, json.source),
     preview: parsePreview(json.preview),
     content: parseContent(json.content),

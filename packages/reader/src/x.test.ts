@@ -9,7 +9,16 @@ import {
   REAL_X_VIDEO_OEMBED,
   REAL_X_VIDEO_PAGE,
 } from './fixtures/real.fixtures';
-import { X_OEMBED } from './fixtures/x.fixtures';
+import {
+  X_ARTICLE_OEMBED,
+  X_ARTICLE_PAGE,
+  X_ARTICLE_PAGE_WITH_DESCRIPTION,
+  X_EXTERNAL_OEMBED,
+  X_EXTERNAL_PAGE,
+  X_OEMBED,
+  X_TEXT_AND_LINK_OEMBED,
+  X_TEXT_AND_LINK_PAGE,
+} from './fixtures/x.fixtures';
 import { parseOembedDate, parseXOembed } from './x';
 
 const URL_ = 'https://twitter.com/example/status/20';
@@ -141,6 +150,64 @@ describe('parseXOembed', () => {
 
   it('should throw ReaderInputError when pageHtml is not a string', () => {
     expect(() => parseXOembed(X_OEMBED, URL_, 5 as unknown as string)).toThrow(ReaderInputError);
+  });
+});
+
+describe('parseXOembed with a post that is only a link', () => {
+  const TITLE = 'Cómo publicar tu app en App Store y Google Play: la guía completa';
+
+  it('should title an article of X with the title of its card, not with the t.co link', () => {
+    const result = parseXOembed(X_ARTICLE_OEMBED, URL_, X_ARTICLE_PAGE);
+    expect([result.title, result.content]).toEqual([
+      TITLE,
+      { kind: 'tweet', html: `<p>${TITLE}</p>`, text: TITLE },
+    ]);
+  });
+
+  it('should show the description of the card under its title', () => {
+    const result = parseXOembed(X_ARTICLE_OEMBED, URL_, X_ARTICLE_PAGE_WITH_DESCRIPTION);
+    expect([result.title, result.content.text, result.description]).toEqual([
+      TITLE,
+      `${TITLE}\nTodo el camino, de la cuenta de desarrollador a la revisión.`,
+      'Todo el camino, de la cuenta de desarrollador a la revisión.',
+    ]);
+  });
+
+  it('should use the card of the page when oEmbed failed', () => {
+    const result = parseXOembed(null, URL_, X_ARTICLE_PAGE);
+    expect([result.title, result.content.text]).toEqual([TITLE, TITLE]);
+  });
+
+  it('should never use a t.co link as title, whether the link is to X or to another site', () => {
+    const external = parseXOembed(X_EXTERNAL_OEMBED, URL_, X_EXTERNAL_PAGE);
+    const withoutPage = parseXOembed(X_EXTERNAL_OEMBED, URL_);
+    const article = parseXOembed(X_ARTICLE_OEMBED, URL_);
+    expect([external.title, withoutPage.title, article.title]).toEqual([
+      'Gon (@gon) on X',
+      'Gon (@gon) on X',
+      'Gon (@gon) on X',
+    ]);
+  });
+
+  it('should keep the link as the body when the page says nothing about it', () => {
+    const result = parseXOembed(X_EXTERNAL_OEMBED, URL_, X_EXTERNAL_PAGE);
+    expect([result.content.kind, result.content.text]).toEqual([
+      'tweet',
+      'https://t.co/AbCdEf1234',
+    ]);
+  });
+
+  it('should keep a very short post that has no link', () => {
+    const oembed = { html: '<blockquote><p>ok</p></blockquote>', author_name: 'Gon' };
+    expect(parseXOembed(oembed, URL_).title).toBe('ok');
+  });
+
+  it('should keep the text of a post that has text and a link', () => {
+    const result = parseXOembed(X_TEXT_AND_LINK_OEMBED, URL_, X_TEXT_AND_LINK_PAGE);
+    expect([result.title, result.content.text]).toEqual([
+      'Mi guía para publicar en las tiendas https://t.co/Zz9',
+      'Mi guía para publicar en las tiendas https://t.co/Zz9',
+    ]);
   });
 });
 

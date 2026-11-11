@@ -82,6 +82,8 @@ export interface Classification {
 /** What reading a link produced, to store once it has been extracted. */
 export interface ReadResult {
   readonly source?: Source;
+  /** Where the page really lives, when that is not the saved link (see `Item.canonicalUrl`). */
+  readonly canonicalUrl?: string;
   readonly preview: ItemPreview | null;
   readonly content: ItemContent | null;
   readonly thumbnail?: Thumbnail | null;
@@ -124,7 +126,8 @@ export interface SyncClient {
    *
    * A link that is already saved (also waiting in the queue, and whatever its status) creates
    * nothing: the existing item comes back with `alreadySaved: true`. Links are compared by
-   * `urlKey`; a deleted item no longer counts.
+   * `urlKey`, against both its saved address and the canonical one a read found; a deleted item
+   * no longer counts.
    */
   saveLink(input: SaveLinkInput): Promise<SavedLink>;
   /** Stores what reading the link produced (preview, content, thumbnail). */
@@ -157,6 +160,14 @@ export interface SyncClient {
   clear(): Promise<void>;
   /** Called after any change of the local data. Returns the unsubscribe. */
   subscribe(listener: () => void): () => void;
+}
+
+/** Whether the item is the link with this `urlKey`, by its saved address or its canonical one. */
+function sameLink(item: Item, key: string): boolean {
+  return (
+    urlKey(item.url) === key ||
+    (item.canonicalUrl !== undefined && urlKey(item.canonicalUrl) === key)
+  );
 }
 
 interface ValueOf {
@@ -638,7 +649,7 @@ export function createSyncClient(options: SyncClientOptions): SyncClient {
       const url = httpUrl(input.url);
       const key = urlKey(url);
       for (const { record, queued } of entries.values()) {
-        if (record.kind === 'item' && urlKey(record.value.url) === key) {
+        if (record.kind === 'item' && sameLink(record.value, key)) {
           return { ...view(record.value, queued), alreadySaved: true };
         }
       }
@@ -681,9 +692,11 @@ export function createSyncClient(options: SyncClientOptions): SyncClient {
 
     async setReadResult(id, result) {
       const { value } = requireEntry(id, 'item');
+      const canonicalUrl = result.canonicalUrl ?? value.canonicalUrl;
       const item = fitItem({
         ...value,
         source: result.source ?? value.source,
+        ...(canonicalUrl === undefined ? {} : { canonicalUrl }),
         preview: result.preview,
         content: result.content,
         thumbnail: result.thumbnail === undefined ? value.thumbnail : result.thumbnail,

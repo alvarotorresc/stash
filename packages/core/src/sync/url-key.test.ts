@@ -20,6 +20,45 @@ describe('urlKey', () => {
     expect(urlKey(input)).toBe(expected);
   });
 
+  it.each([
+    ['https://x.com/ana/status/1?s=20&t=AbC_dEf', 'https://x.com/ana/status/1'],
+    ['https://twitter.com/ana/status/1?s=20&t=AbC', 'https://x.com/ana/status/1'],
+    ['https://mobile.twitter.com/ana/status/1', 'https://x.com/ana/status/1'],
+    ['https://www.x.com/ana/status/1/', 'https://x.com/ana/status/1'],
+    ['https://www.twitter.com/ana/status/1?s=1', 'https://x.com/ana/status/1'],
+    ['https://x.com/i/article/99?s=3&t=z', 'https://x.com/i/article/99'],
+  ])('should treat the X link %s as %s', (input, expected) => {
+    expect(urlKey(input)).toBe(expected);
+  });
+
+  it('should keep other parameters of X and "s" or "t" elsewhere', () => {
+    expect(urlKey('https://x.com/search?q=a&s=typed')).toBe('https://x.com/search?q=a');
+    expect(urlKey('https://example.com/a?s=1&t=2')).toBe('https://example.com/a?s=1&t=2');
+  });
+
+  it.each([
+    [
+      'https://www.tiktok.com/@ana/video/7?_r=1&_t=ZN-8x&is_from_webapp=1&sender_device=pc&share_app_id=1233&share_link_id=ab&u_code=c&timestamp=9&social_sharing=1&utm_source=copy',
+      'https://www.tiktok.com/@ana/video/7',
+    ],
+    ['https://vm.tiktok.com/ZMabc/?_r=1&_t=z', 'https://vm.tiktok.com/ZMabc'],
+    ['https://www.tiktok.com/@ana/video/7?lang=es', 'https://www.tiktok.com/@ana/video/7?lang=es'],
+  ])('should drop the share parameters of TikTok in %s', (input, expected) => {
+    expect(urlKey(input)).toBe(expected);
+  });
+
+  it('should drop the share parameters of Instagram and Reddit but keep the slide index', () => {
+    expect(urlKey('https://www.instagram.com/p/abc/?igsh=x&img_index=2')).toBe(
+      'https://www.instagram.com/p/abc?img_index=2',
+    );
+    expect(
+      urlKey('https://www.reddit.com/r/a/comments/1/t/?share_id=x&rdt=5&ref=share&ref_source=link'),
+    ).toBe('https://www.reddit.com/r/a/comments/1/t');
+    expect(urlKey('https://example.com/a?share_id=1&rdt=2&_r=3')).toBe(
+      'https://example.com/a?share_id=1&rdt=2&_r=3',
+    );
+  });
+
   it('should keep the parameters that identify the page, in their order', () => {
     expect(urlKey('https://example.com/s?b=2&a=1&utm_campaign=z')).toBe(
       'https://example.com/s?b=2&a=1',

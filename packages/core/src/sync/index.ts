@@ -20,6 +20,7 @@ export type {
   RecordCache,
 } from './cache';
 export { SyncError } from './errors';
+export { urlKey } from './url-key';
 export type { SyncErrorCode } from './errors';
 export {
   CONTENT_KINDS,

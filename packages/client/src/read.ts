@@ -1,5 +1,5 @@
 import type { ExtractData } from '@stash/core/extract';
-import type { ReadResult } from '@stash/core/sync';
+import { urlKey, type ReadResult } from '@stash/core/sync';
 import {
   minimalResult,
   parsePage,
@@ -45,13 +45,35 @@ export function toReadResult(result: ReaderResult): ReadResult {
   };
 }
 
+/** Path of a video on TikTok; the proxy rebuilds the page address from it. */
+const TIKTOK_VIDEO_PATH = /^\/@[\w.-]{0,64}\/video\/\d+\/?$/;
+
+/**
+ * The address the proxy read a TikTok short link at: the video's own page. Only when it differs
+ * from the link that was saved, so the same video saved again as a full link is recognized.
+ */
+function canonicalOf(data: ExtractData, url: string): string | undefined {
+  if (data.kind !== 'tiktok' || !data.page) return undefined;
+  try {
+    const page = new URL(data.page.url);
+    const onTikTok = page.protocol === 'https:' && /(^|\.)tiktok\.com$/.test(page.hostname);
+    if (!onTikTok || !TIKTOK_VIDEO_PATH.test(page.pathname)) return undefined;
+    page.search = '';
+    page.hash = '';
+    return urlKey(page.href) === urlKey(url) ? undefined : page.href;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Reads a link on the device from what the proxy returned. Data from the network that does not
  * have the expected shape degrades to the bare link: a save never fails because of its page.
  */
 export function readExtract(data: ExtractData, url: string): ReadResult {
   try {
-    return toReadResult(parse(data, url));
+    const canonicalUrl = canonicalOf(data, url);
+    return { ...toReadResult(parse(data, url)), ...(canonicalUrl ? { canonicalUrl } : {}) };
   } catch {
     return toReadResult(minimalResult(url));
   }

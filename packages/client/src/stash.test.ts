@@ -332,22 +332,132 @@ describe('createStash', () => {
       }).toEqual({ title: 'La despensa', kind: 'article', extracted: 0 });
     });
 
-    it('should return the existing item for a link already saved, without reading it again', async () => {
-      const { backend, phone } = await registered();
-      articleAt(backend, URL_A, 'La despensa');
-      const first = await phone.stash.save(URL_A);
-      await phone.stash.idle();
-      const reads = backend.extracted.length;
+    describe('a link already saved', () => {
+      /** Saved, read and sorted by hand: what must survive being saved again. */
+      async function sorted() {
+        const { backend, phone } = await registered();
+        articleAt(backend, URL_A, 'La despensa');
+        const first = await phone.stash.save(URL_A);
+        await phone.stash.idle();
+        await phone.stash.change(async (sync) => {
+          await sync.classify(first.id, { priority: 'high', tags: ['cocina'] });
+          await sync.setStatus(first.id, 'read');
+        });
+        return { backend, phone, first, reads: backend.extracted.length };
+      }
 
-      const again = await phone.stash.save(`${URL_A}#otra-parte`);
-      await phone.stash.idle();
+      it('should return the existing item and read it again, keeping how it was sorted', async () => {
+        const { backend, phone, first, reads } = await sorted();
+        articleAt(backend, URL_A, 'La despensa, ampliada');
 
-      expect({
-        id: again.id,
-        alreadySaved: again.alreadySaved,
-        reads: backend.extracted.length - reads,
-        listed: phone.stash.sync.listItems().length,
-      }).toEqual({ id: first.id, alreadySaved: true, reads: 0, listed: 1 });
+        const again = await phone.stash.save(`${URL_A}#otra-parte`);
+        await phone.stash.idle();
+        const item = phone.stash.sync.getItem(first.id);
+
+        expect({
+          returned: [again.id, again.alreadySaved],
+          reads: backend.extracted.length - reads,
+          listed: phone.stash.sync.listItems().length,
+          title: item?.title,
+          sorted: [item?.priority, item?.tags.map((tag) => tag.name), item?.status],
+        }).toEqual({
+          returned: [first.id, true],
+          reads: 1,
+          listed: 1,
+          title: 'La despensa, ampliada',
+          sorted: ['high', ['cocina'], 'read'],
+        });
+      });
+
+      it('should leave what it had when the new read fails', async () => {
+        const { backend, phone, first } = await sorted();
+        backend.pages.delete(URL_A);
+
+        await phone.stash.save(URL_A);
+        await phone.stash.idle();
+
+        expect(phone.stash.sync.getItem(first.id)?.title).toBe('La despensa');
+      });
+
+      it('should leave what it had when the new read finds nothing', async () => {
+        const { backend, phone, first } = await sorted();
+        backend.pages.set(URL_A, { kind: 'x', oembed: null, page: null });
+
+        await phone.stash.save(URL_A);
+        await phone.stash.idle();
+
+        expect(phone.stash.sync.getItem(first.id)?.title).toBe('La despensa');
+      });
+
+      it('should not ask the proxy without connection, and still return the item', async () => {
+        const { backend, phone, first, reads } = await sorted();
+        backend.online = false;
+
+        const again = await phone.stash.save(URL_A);
+        await phone.stash.idle();
+
+        expect([again.id, again.alreadySaved, backend.extracted.length - reads]).toEqual([
+          first.id,
+          true,
+          0,
+        ]);
+      });
+
+      it('should store the read it is given instead of asking the proxy', async () => {
+        const { backend, phone, first, reads } = await sorted();
+        const page = webPage(URL_A, 'Desde la pestaña', ['uno dos tres '.repeat(30)]);
+        const read = readHtml(page.kind === 'web' ? page.page.body : '', URL_A);
+
+        await phone.stash.save(URL_A, { read });
+        await phone.stash.idle();
+
+        expect([
+          phone.stash.sync.getItem(first.id)?.title,
+          backend.extracted.length - reads,
+        ]).toEqual(['Desde la pestaña', 0]);
+      });
+
+      it('should not read a link that is only waiting in the queue', async () => {
+        const { backend, phone } = await registered();
+        articleAt(backend, URL_B, 'El otoño');
+        backend.online = false;
+        await phone.stash.save(URL_B);
+
+        const again = await phone.stash.save(URL_B);
+
+        expect([again.queued, again.alreadySaved, backend.extracted.length]).toEqual([
+          true,
+          true,
+          0,
+        ]);
+      });
+
+      it('should recognize a TikTok short link by the video address it led to', async () => {
+        const { backend, phone } = await registered();
+        const short = 'https://vm.tiktok.com/ZMabc/';
+        const video = 'https://www.tiktok.com/@ana/video/7378294254344342827';
+        const doc = (url: string, body: string) => ({
+          url,
+          contentType: 'text/html',
+          body,
+          truncated: false,
+        });
+        backend.pages.set(short, {
+          kind: 'tiktok',
+          oembed: doc(video, JSON.stringify({ title: 'Despensa', author_name: 'Ana' })),
+          page: doc(video, '<html></html>'),
+        });
+        const first = await phone.stash.save(short);
+        await phone.stash.idle();
+
+        const again = await phone.stash.save(`${video}?_r=1&_t=ZN-x&is_from_webapp=1`);
+
+        expect([again.id, again.alreadySaved, phone.stash.sync.listItems().length]).toEqual([
+          first.id,
+          true,
+          1,
+        ]);
+      });
     });
 
     it('should queue a save without connection and read it once back online', async () => {

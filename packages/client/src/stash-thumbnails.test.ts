@@ -112,6 +112,59 @@ function contains(haystack: Uint8Array, needle: Uint8Array): boolean {
   return false;
 }
 
+describe('thumbnails of a link saved again', () => {
+  const NEW_IMAGE = 'https://cdn.example.com/new-cover.jpg';
+
+  async function savedWithThumbnail() {
+    const { backend, phone } = await signedIn();
+    pageWithImage(backend);
+    backend.images.set(IMAGE, { type: 'image/jpeg', bytes: JPEG });
+    const saved = await phone.stash.save(PAGE);
+    await phone.stash.idle();
+    return { backend, phone, saved };
+  }
+
+  it('should make the thumbnail again from the new image the read brings', async () => {
+    const { backend, phone, saved } = await savedWithThumbnail();
+    const before = phone.stash.sync.getItem(saved.id)?.thumbnail;
+    pageWithImage(backend, PAGE, NEW_IMAGE);
+    backend.images.set(NEW_IMAGE, { type: 'image/jpeg', bytes: JPEG });
+
+    await phone.stash.save(PAGE);
+    await phone.stash.idle();
+    const item = phone.stash.sync.getItem(saved.id);
+
+    expect({
+      imageUrl: item?.preview?.imageUrl,
+      replaced: item?.thumbnail !== before && item?.thumbnail !== null,
+      imageRequests: backend.imagesFetched,
+    }).toEqual({ imageUrl: NEW_IMAGE, replaced: true, imageRequests: [IMAGE, NEW_IMAGE] });
+  });
+
+  it('should not download the image again when its address did not change', async () => {
+    const { backend, phone } = await savedWithThumbnail();
+
+    await phone.stash.save(PAGE);
+    await phone.stash.idle();
+
+    expect(backend.imagesFetched).toEqual([IMAGE]);
+  });
+
+  it('should keep the old thumbnail when the new image cannot be made', async () => {
+    const { backend, phone, saved } = await savedWithThumbnail();
+    pageWithImage(backend, PAGE, NEW_IMAGE);
+
+    await phone.stash.save(PAGE);
+    await phone.stash.idle();
+    const item = phone.stash.sync.getItem(saved.id);
+
+    expect([item?.thumbnail?.bytes.byteLength, item?.preview?.title]).toEqual([
+      MARKER.length * 40,
+      'La despensa',
+    ]);
+  });
+});
+
 describe('thumbnails', () => {
   it('should download the image through the proxy and keep the thumbnail with the item', async () => {
     const { backend, phone } = await signedIn();

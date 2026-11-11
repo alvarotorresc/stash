@@ -57,6 +57,10 @@ describe('codec', () => {
       kind: 'item',
       value: item({ thumbnail: null, preview: null, content: null, priority: null }),
     },
+    {
+      kind: 'item',
+      value: item({ canonicalUrl: 'https://www.tiktok.com/@ana/video/7' }),
+    },
     { kind: 'category', value: { id: ID, name: 'Cocina', order: 2, createdAt: 1, updatedAt: 3 } },
     { kind: 'tag', value: { id: ID, name: 'cena', createdAt: 1 } },
   ])('should encrypt and decrypt a $kind record unchanged', async (record) => {
