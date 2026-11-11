@@ -41,7 +41,7 @@ stash.sync.listItems(); // reads go straight to the sync client
   or the server fails for a while, and only then asks the proxy for the page. Reading happens on
   the device (`readExtract`): a page the proxy cannot fetch for good (blocked site, timeout,
   unsupported type) is kept as the bare link and not asked again; a busy proxy or no connection
-  leaves it unread for the next `refresh`, at most 20 links each time.
+  leaves it unread for the next `refresh`, at most 15 links each time.
 - **Changes in order.** A change rewrites the whole item, so `change` runs them one after
   another: a background read and a classification made meanwhile both survive.
 - **A session closed by the server** (password changed on another device) clears only the
@@ -50,6 +50,34 @@ stash.sync.listItems(); // reads go straight to the sync client
   first.
 - **Pages already read.** The extension reads the open tab itself: `readHtml` turns its HTML into
   a `ReadResult` and `save(url, { read })` stores it with the link, with no call to the proxy.
+- **Thumbnails.** When a page has an image (`preview.imageUrl`), the device asks the proxy for it
+  (`POST /api/extract/image`, never the site that serves it), reduces it with `createImageBitmap`
+  and a canvas, and stores the result encrypted inside the item (`thumbnail`). It is made in the
+  same write as the read result, right away, because some covers (TikTok) are signed and expire
+  in about two days.
+  - **Size.** Longest side 320 px (240 px as a second step), WebP (JPEG where the browser cannot
+    encode it), quality 0.7, 0.5, 0.3 until it is at most 12 KiB. If nothing gets under 12 KiB the
+    smallest result is kept up to 24 KiB; above that the item has no thumbnail. The reason is the
+    quota: an account holds 25 MiB over at most 5 000 records, and at 40 KiB each a few hundred
+    items would use it. A photo at that size is typically 8 to 12 KiB.
+  - **Failures never lose the item.** A corrupt image, a type that is not JPEG, PNG, WebP, GIF or
+    AVIF (SVG is refused by the proxy and again here), a body over 5 MiB, a gone image or a failed
+    decode leave the item saved with its preview and no thumbnail.
+  - **At most two tries.** One when the link is read or saved, and one on a later sync; if that
+    also fails the image address is removed from the preview (one write, it syncs to the other
+    devices) and it is never asked for again. A missing connection, a rate limit or a failing
+    proxy do not count as a try: the batch stops and the item is left for the next sync. The
+    count of the first try lives in memory, so after a reload an item gets one more try at most.
+  - **Quota.** If the account has no room for the thumbnail, the item is stored without it.
+  - **Items saved before.** Each `refresh` adds the thumbnail to at most 10 items that have an
+    image address and no thumbnail, newest first. Reads (15) and fills (10) use at most
+    15 x 2 + 10 = 40 requests, under the proxy's 60 every 10 minutes per account.
+  - **Where.** Only in a context with a DOM and image decoding (`makeThumbnail`, on by default
+    next to `readPages`): the extension's background saves without thumbnail and the next sync of
+    the popup or the PWA adds it. `makeThumbnail: null` turns them off.
+  - `createThumbnailUrls()` turns the decrypted bytes into `blob:` URLs, once per image, and
+    revokes them when the image changes, the item disappears (`keepOnly`) or the session ends
+    (`clear`). Nothing is written to disk in the clear.
 - **No DOM, no reading.** Where `DOMParser` is missing (the extension's background) links are
   saved without reading; a context with a DOM reads them on its next `refresh`.
 
