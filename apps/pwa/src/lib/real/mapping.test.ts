@@ -53,6 +53,9 @@ describe('originOf', () => {
     ['x', 'https://x.com/ana/status/1', '@ana'],
     ['x', 'https://x.com/i/web/status/1', 'x.com'],
     ['instagram', 'https://www.instagram.com/p/abc/', 'instagram.com'],
+    ['tiktok', 'https://www.tiktok.com/@ana/video/1', '@ana'],
+    ['tiktok', 'https://vm.tiktok.com/ZMabc/', 'vm.tiktok.com'],
+    ['tiktok', 'https://www.tiktok.com/@/video/1', 'tiktok.com'],
   ] as const)('should name the origin of a %s link', (source, url, origin) => {
     expect(originOf({ source, url })).toBe(origin);
   });
@@ -152,6 +155,22 @@ describe('toContent', () => {
       kind: 'preview',
       description: 'Pie de foto',
       image: { src: 'blob:stash/img', alt: '' },
+      blocked: false,
+    });
+  });
+
+  it('should keep TikTok as a preview with the caption of the video', () => {
+    const video = view({
+      url: 'https://www.tiktok.com/@ana/video/1',
+      source: 'tiktok',
+      preview: preview({ description: 'Cómo ordenar la despensa #orden' }),
+      content: { kind: 'none', text: '' },
+    });
+
+    expect(toContent(video)).toEqual({
+      kind: 'preview',
+      description: 'Cómo ordenar la despensa #orden',
+      image: undefined,
       blocked: false,
     });
   });

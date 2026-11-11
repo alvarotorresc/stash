@@ -30,6 +30,36 @@ declare a huge canvas (a pixel bomb). That protection belongs to the client: whe
 thumbnail, it must read or bound the dimensions before decoding (for example with
 `createImageBitmap` and `resizeWidth`/`resizeHeight`) and discard images above a megapixel limit.
 
+### X and TikTok
+
+Both use the official oEmbed endpoint plus the page of the post, downloaded in parallel; either can
+fail without losing the save, and only when both fail does the request fail. No third-party
+service sees the URL. Checked on 2026-11-11 from the Cloudflare network (`wrangler dev --remote`)
+with the User-Agent below:
+
+- **X.** `publish.twitter.com/oembed` answers a 301 to `publish.x.com` (followed, each hop checked)
+  and then the text, author and date. The page of the post answers its Open Graph tags, with the
+  text and `og:image` (the photo, or the video thumbnail). On a post with no media, `og:image` is
+  the author's avatar, which the reader discards.
+- **TikTok.** `tiktok.com/oembed` answers only an iframe: no title, author or `thumbnail_url`. The
+  video page has no useful meta tags either (its title is "TikTok - Make Your Day"), but it embeds
+  the state it hydrates from (`webapp.video-detail`) with the caption, author, cover and date. The
+  reader uses oEmbed fields if TikTok brings them back and falls back to that state, which is not a
+  documented interface: if it changes or a video is not public (`statusCode` other than 0), the
+  link is kept as a preview with no text.
+- **TikTok share links** (`vm.tiktok.com`, `vt.tiktok.com`, `tiktok.com/t/<code>`) are followed
+  until a video address and then rebuilt as `https://www.tiktok.com/@<account>/video/<id>`, which
+  drops the parameters that identify who shared the link. When they end on the home page (a gone
+  link) the answer is the bare link.
+- There is no host allow list in the proxy: `url-guard.ts` is a deny list, so no host had to be
+  added. `hostIs(url, 'tiktok.com')` only chooses the adapter, and the URLs sent to TikTok are built
+  from the account and the id, never from the rest of the link.
+- **Images.** The covers are served by `pbs.twimg.com` (stable) and by TikTok's CDN (signed, they
+  expire in about two days), and `POST /api/extract/image` can download both. The client does not
+  call it yet: until encrypted thumbnails are saved (a separate feature), `preview.imageUrl` is
+  stored as data and no image is shown. When thumbnails arrive, TikTok covers must be downloaded
+  when the link is saved.
+
 ### User-Agent
 
 Outbound requests identify themselves as

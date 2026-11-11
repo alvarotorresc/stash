@@ -32,6 +32,14 @@ const X_PAGE_HTML = '<meta property="og:description" content="just setting up my
 
 const IG_POST = 'https://www.instagram.com/p/BsOGulcndj-/';
 
+const TT_VIDEO = 'https://www.tiktok.com/@themuthership/video/7378294254344342827';
+const TT_OEMBED = `https://www.tiktok.com/oembed?url=${encodeURIComponent(TT_VIDEO)}`;
+// Recorded from tiktok.com: today the oEmbed answers an iframe and nothing else.
+const TT_OEMBED_JSON =
+  '{"version":"1.0","type":"video","width":"325","height":"578","html":"<iframe height=\\"578\\" width=\\"325\\" src=\\"https://www.tiktok.com/player/v1/7378294254344342827?embed_from=oembed\\"></iframe>","provider_url":"https://www.tiktok.com","provider_name":"TikTok","embed_product_id":"7378294254344342827","embed_type":"video"}';
+const TT_PAGE_HTML =
+  '<title>TikTok - Make Your Day</title><script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">{}</script>';
+
 function json(body: string, status = 200): Response {
   return new Response(body, { status, headers: { 'Content-Type': 'application/json' } });
 }
@@ -300,6 +308,216 @@ describe('POST /api/extract — x', () => {
     const data = await extractOk(fetch, 'https://x.com/jack');
 
     expect(data.kind).toBe('web');
+  });
+});
+
+describe('POST /api/extract — x oEmbed redirect', () => {
+  it('should follow the redirect of the oembed endpoint to publish.x.com', async () => {
+    // Recorded: publish.twitter.com answers 301 to publish.x.com with the same query.
+    const moved =
+      'https://publish.x.com/oembed?url=https%3A%2F%2Ftwitter.com%2Fjack%2Fstatus%2F20&omit_script=1&dnt=true';
+    const { fetch } = fakeFetch({
+      [X_OEMBED]: () => redirect(moved),
+      [moved]: () => json(X_OEMBED_JSON),
+      [X_PAGE]: () => html(X_PAGE_HTML),
+    });
+
+    const data = await extractOk(fetch, X_POST);
+
+    expect(data.kind === 'x' && data.oembed?.body).toBe(X_OEMBED_JSON);
+  });
+});
+
+describe('POST /api/extract — tiktok', () => {
+  it('should return the official oembed and the video page', async () => {
+    const { fetch } = fakeFetch({
+      [TT_OEMBED]: () => json(TT_OEMBED_JSON),
+      [TT_VIDEO]: () => html(TT_PAGE_HTML),
+    });
+
+    const data = await extractOk(fetch, TT_VIDEO);
+
+    expect(data).toEqual({
+      kind: 'tiktok',
+      oembed: {
+        url: TT_OEMBED,
+        contentType: 'application/json',
+        body: TT_OEMBED_JSON,
+        truncated: false,
+      },
+      page: { url: TT_VIDEO, contentType: 'text/html', body: TT_PAGE_HTML, truncated: false },
+    });
+  });
+
+  it('should request the canonical video, without tracking parameters or a mobile host', async () => {
+    const { fetch, calls } = fakeFetch({
+      [TT_OEMBED]: () => json(TT_OEMBED_JSON),
+      [TT_VIDEO]: () => html(TT_PAGE_HTML),
+    });
+
+    await extractOk(
+      fetch,
+      `https://m.tiktok.com/@themuthership/video/7378294254344342827?_r=1&u_code=abc&is_from_webapp=1#top`,
+    );
+
+    expect(calls.map((call) => call.url).sort()).toEqual([TT_OEMBED, TT_VIDEO].sort());
+  });
+
+  it('should keep the oembed when the page fails', async () => {
+    const { fetch } = fakeFetch({
+      [TT_OEMBED]: () => json(TT_OEMBED_JSON),
+      [TT_VIDEO]: () => html('', { status: 403 }),
+    });
+
+    const data = await extractOk(fetch, TT_VIDEO);
+
+    expect(data.kind === 'tiktok' && [data.oembed?.body, data.page]).toEqual([
+      TT_OEMBED_JSON,
+      null,
+    ]);
+  });
+
+  it('should keep the page when the oembed fails', async () => {
+    const { fetch } = fakeFetch({
+      [TT_OEMBED]: () => json('{}', 400),
+      [TT_VIDEO]: () => html(TT_PAGE_HTML),
+    });
+
+    const data = await extractOk(fetch, TT_VIDEO);
+
+    expect(data.kind === 'tiktok' && [data.oembed, data.page?.body]).toEqual([null, TT_PAGE_HTML]);
+  });
+
+  it('should fail when both downloads fail', async () => {
+    const { fetch } = fakeFetch({
+      [TT_OEMBED]: () => json('{}', 404),
+      [TT_VIDEO]: () => html('', { status: 403 }),
+    });
+
+    const res = await app({ fetch })('/api/extract', postJson({ url: TT_VIDEO }));
+
+    expect(await errorOf(res)).toEqual({ status: 502, code: 'UPSTREAM_ERROR' });
+  });
+
+  it('should answer 413 when the oembed is too large and the page fails', async () => {
+    const { fetch } = fakeFetch({
+      [TT_OEMBED]: () => json('x'.repeat(2000)),
+      [TT_VIDEO]: () => html('', { status: 403 }),
+    });
+
+    const res = await app({ fetch, limits: { maxJsonBytes: 1000 } })(
+      '/api/extract',
+      postJson({ url: TT_VIDEO }),
+    );
+
+    expect(await errorOf(res)).toEqual({ status: 413, code: 'TOO_LARGE' });
+  });
+
+  it('should refuse an oembed served as html', async () => {
+    const { fetch } = fakeFetch({
+      [TT_OEMBED]: () => html('<p>blocked</p>'),
+      [TT_VIDEO]: () => html(TT_PAGE_HTML),
+    });
+
+    const data = await extractOk(fetch, TT_VIDEO);
+
+    expect(data.kind === 'tiktok' && data.oembed).toBeNull();
+  });
+
+  it('should resolve a share link to the video without downloading the shared address', async () => {
+    // Synthetic: no live share link was found; the redirect has the shape tiktok.com answers
+    // (a video path with share parameters that identify who shared it).
+    const share = 'https://vt.tiktok.com/ZSexample/';
+    const shared = `${TT_VIDEO}?_r=1&u_code=abc123&share_item_id=7378294254344342827&utm_source=short_fallback`;
+    const { fetch, calls } = fakeFetch({
+      [share]: () => redirect(shared, 302),
+      [TT_OEMBED]: () => json(TT_OEMBED_JSON),
+      [TT_VIDEO]: () => html(TT_PAGE_HTML),
+    });
+
+    const data = await extractOk(fetch, share);
+
+    expect(data.kind).toBe('tiktok');
+    expect(calls.map((call) => call.url)).toEqual(
+      expect.arrayContaining([share, TT_OEMBED, TT_VIDEO]),
+    );
+    expect(calls.map((call) => call.url)).not.toContain(shared);
+    expect(JSON.stringify(calls.slice(1))).not.toContain('u_code');
+  });
+
+  it('should resolve a video with no account in the link', async () => {
+    const noUser = 'https://www.tiktok.com/@/video/7604403945846426900';
+    const oembed = `https://www.tiktok.com/oembed?url=${encodeURIComponent(noUser)}`;
+    const share = 'https://vm.tiktok.com/ZMexample/';
+    const { fetch } = fakeFetch({
+      [share]: () => redirect(`${noUser}?_r=1&u_code=abc`, 302),
+      [oembed]: () => json(TT_OEMBED_JSON),
+      [noUser]: () => html(TT_PAGE_HTML),
+    });
+
+    expect((await extractOk(fetch, share)).kind).toBe('tiktok');
+  });
+
+  it('should keep the bare link when a share link no longer leads to a video', async () => {
+    // Recorded: tiktok.com/t/<code> redirects to www and then to the home page when the link is
+    // gone, or when tiktok.com does not serve it to the proxy.
+    const share = 'https://tiktok.com/t/ZPexample/';
+    const { fetch, calls } = fakeFetch({
+      [share]: () => redirect('https://www.tiktok.com/t/ZPexample/', 301),
+      'https://www.tiktok.com/t/ZPexample/': () => redirect('https://www.tiktok.com/?_r=1', 302),
+      'https://www.tiktok.com/?_r=1': () => html('<title>TikTok - Make Your Day</title>'),
+    });
+
+    const data = await extractOk(fetch, share);
+
+    expect(data).toEqual({ kind: 'tiktok', oembed: null, page: null });
+    expect(calls).toHaveLength(3);
+  });
+
+  it('should still refuse a share link that redirects to a private address', async () => {
+    const share = 'https://vm.tiktok.com/ZMexample/';
+    const { fetch } = fakeFetch({ [share]: () => redirect('http://10.0.0.1/', 302) });
+
+    const res = await app({ fetch })('/api/extract', postJson({ url: share }));
+
+    expect(await errorOf(res)).toEqual({ status: 400, code: 'URL_NOT_ALLOWED' });
+  });
+
+  it('should not treat a share link that ends on another site as a video', async () => {
+    const share = 'https://vm.tiktok.com/ZMexample/';
+    const { fetch } = fakeFetch({
+      [share]: () => redirect('https://evil.example.com/@a/video/1', 302),
+      'https://evil.example.com/@a/video/1': () => html('<p>x</p>'),
+    });
+
+    const data = await extractOk(fetch, share);
+
+    expect(data).toEqual({ kind: 'tiktok', oembed: null, page: null });
+  });
+
+  it('should treat a profile as a plain page', async () => {
+    const profile = 'https://www.tiktok.com/@themuthership';
+    const { fetch } = fakeFetch({ [profile]: () => html('<title>profile</title>') });
+
+    const data = await extractOk(fetch, profile);
+
+    expect(data.kind).toBe('web');
+  });
+
+  it.each([
+    ['look-alike host', 'https://nottiktok.com/@a/video/1'],
+    ['host that only contains tiktok.com', 'https://tiktok.com.evil.org/@a/video/1'],
+  ])('should treat a %s as a plain page', async (_name, url) => {
+    const { fetch } = fakeFetch({ [url]: () => html('<p>x</p>') });
+
+    expect((await extractOk(fetch, url)).kind).toBe('web');
+  });
+
+  it('should only build upstream addresses from the account and the id of the link', async () => {
+    const odd = 'https://www.tiktok.com/@a%2F..%2Fb/video/1';
+    const { fetch } = fakeFetch({ [odd]: () => html('<p>x</p>') });
+
+    expect((await extractOk(fetch, odd)).kind).toBe('web');
   });
 });
 

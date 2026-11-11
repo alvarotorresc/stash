@@ -71,6 +71,7 @@ function sourceOf(url: URL): Source {
   if (host === 'x.com' || host === 'twitter.com') return 'x';
   if (host.endsWith('reddit.com')) return 'reddit';
   if (host.endsWith('instagram.com')) return 'instagram';
+  if (host === 'tiktok.com' || host.endsWith('.tiktok.com')) return 'tiktok';
   return 'web';
 }
 
@@ -78,6 +79,7 @@ function originOf(url: URL, source: Source): string {
   const parts = url.pathname.split('/').filter(Boolean);
   if (source === 'reddit' && parts[0] === 'r' && parts[1]) return `r/${parts[1]}`;
   if (source === 'x' && parts[0]) return `@${parts[0]}`;
+  if (source === 'tiktok' && parts[0]?.startsWith('@')) return parts[0];
   return url.hostname.replace(/^www\./, '');
 }
 

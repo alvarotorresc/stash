@@ -34,7 +34,7 @@
   const source = $derived(item ? SOURCE_LABELS[item.source] : '');
   const openLabel = $derived(item?.source === 'web' ? 'Abrir original' : `Abrir en ${source}`);
   const content = $derived(detail?.content);
-  // Instagram's preview already has its own button to the original.
+  // The preview of Instagram and TikTok already has its own button to the original.
   const barLink = $derived(
     item && !(content?.kind === 'preview' && !content.blocked)
       ? { label: openLabel, href: item.url }
@@ -100,8 +100,8 @@
         description={content.description}
         image={content.image}
         open={{ label: openLabel, href: item.url }}
-        note={item.source === 'instagram' && !content.blocked
-          ? 'De Instagram, Stash guarda la vista previa y el enlace.'
+        note={(item.source === 'instagram' || item.source === 'tiktok') && !content.blocked
+          ? `De ${source}, Stash guarda la vista previa y el enlace.`
           : undefined}
         blocked={content.blocked
           ? {

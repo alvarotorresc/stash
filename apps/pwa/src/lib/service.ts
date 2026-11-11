@@ -6,7 +6,7 @@ import type { ImageData, PasswordStrength, Priority, SanitizedHtml, Tone } from 
  * cache) implements it, and so does the in-memory mock for tests and design.
  */
 
-export type Source = 'web' | 'x' | 'reddit' | 'instagram';
+export type Source = 'web' | 'x' | 'reddit' | 'instagram' | 'tiktok';
 export type Status = 'pending' | 'read' | 'discarded';
 
 export interface Category {
@@ -51,7 +51,7 @@ export type ItemContent =
       date: string;
     }
   | { kind: 'reddit'; meta: string; html: SanitizedHtml }
-  /** Instagram always, and any source that blocked reading. */
+  /** Instagram and TikTok always, and any source that blocked reading. */
   | { kind: 'preview'; description?: string; image?: ImageData; blocked: boolean }
   /** Queued: nothing downloaded yet. */
   | { kind: 'none' };

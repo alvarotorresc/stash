@@ -36,6 +36,7 @@ export function originOf(item: Pick<ItemView, 'url' | 'source'>): string {
   const [first, second] = url.pathname.split('/').filter(Boolean);
   if (item.source === 'reddit' && first === 'r' && second) return `r/${second}`;
   if (item.source === 'x' && first && first !== 'i') return `@${first}`;
+  if (item.source === 'tiktok' && first?.startsWith('@') && first.length > 1) return first;
   return host(url);
 }
 
@@ -123,8 +124,8 @@ export function toContent(view: ItemView, image?: string): ItemContent {
       kind: 'preview',
       description: view.preview?.description ?? undefined,
       image: picture,
-      // X and Reddit were read and gave nothing: they blocked it. Instagram is
-      // always a preview; a web page without text keeps its preview and link.
+      // X and Reddit were read and gave nothing: they blocked it. Instagram and
+      // TikTok are always a preview; a web page without text keeps its preview and link.
       blocked: content !== null && (view.source === 'x' || view.source === 'reddit'),
     };
   }

@@ -12,6 +12,9 @@ describe('detectSource', () => {
     ['https://TWITTER.COM./example', 'x'],
     ['https://www.instagram.com/p/abc/', 'instagram'],
     ['https://instagr.am/p/abc/', 'instagram'],
+    ['https://www.tiktok.com/@user/video/7378294254344342827', 'tiktok'],
+    ['https://vm.tiktok.com/ZMabc123/', 'tiktok'],
+    ['https://m.tiktok.com/v/7378294254344342827', 'tiktok'],
     ['https://blog.example.com/post', 'web'],
     ['https://t.co/abc', 'web'],
   ])('should detect %s as %s', (url, source) => {
@@ -22,6 +25,8 @@ describe('detectSource', () => {
     'https://evilreddit.com/r/x',
     'https://reddit.com.evil.example/r/x',
     'https://notx.com/',
+    'https://nottiktok.com/@a/video/1',
+    'https://tiktok.com.evil.example/@a/video/1',
   ])('should not match a look-alike host such as %s', (url) => {
     expect(detectSource(url)).toBe('web');
   });
@@ -46,6 +51,11 @@ describe('isShortLink', () => {
     ['https://www.reddit.com/r/example/comments/abc123/', false],
     ['https://i.redd.it/image.png', false],
     ['https://x.com/example/status/20', false],
+    ['https://vm.tiktok.com/ZMabc123/', true],
+    ['https://vt.tiktok.com/ZSabc123/', true],
+    ['https://www.tiktok.com/t/ZPabc123/', true],
+    ['https://www.tiktok.com/@user/video/7378294254344342827', false],
+    ['https://www.tiktok.com/@user', false],
   ])('should return the right answer for %s', (url, expected) => {
     expect(isShortLink(url)).toBe(expected);
   });

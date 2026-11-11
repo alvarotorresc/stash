@@ -166,4 +166,71 @@ describe('Saving and reading on the real service', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Cerrar aviso' }));
     expect(app.failure).toBeNull();
   });
+
+  async function saveAndOpen(device: ReturnType<typeof realDevice>, url: string) {
+    const { app, stash } = await renderRealApp(`?share=${encodeURIComponent(url)}#/`, device);
+    const sheet = await screen.findByRole('dialog', { name: /Guardado:/ });
+    await fireEvent.keyDown(sheet, { key: 'Escape' });
+    await waitFor(() => expect(app.sheet).toBeNull());
+    await stash.idle();
+    const saved = await waitFor(() => {
+      const item = app.items.find((entry) => entry.url === url);
+      expect(item?.title).not.toBe(url);
+      return item;
+    });
+    return { app, saved };
+  }
+
+  it('should show a TikTok video with its caption and a link to the original', async () => {
+    const device = await signedUpDevice();
+    const video = 'https://www.tiktok.com/@ana/video/7378294254344342827';
+    const state = {
+      __DEFAULT_SCOPE__: {
+        'webapp.video-detail': {
+          statusCode: 0,
+          itemInfo: {
+            itemStruct: {
+              desc: 'Cómo ordenar la despensa #orden',
+              author: { uniqueId: 'ana', nickname: 'Ana' },
+            },
+          },
+        },
+      },
+    };
+    const page = `<html><head><title>TikTok - Make Your Day</title><script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">${JSON.stringify(state)}</script></head><body></body></html>`;
+    device.backend.pages.set(video, {
+      kind: 'tiktok',
+      oembed: null,
+      page: { url: video, contentType: 'text/html', body: page, truncated: false },
+    });
+
+    const { app, saved } = await saveAndOpen(device, video);
+    expect(saved).toMatchObject({ source: 'tiktok', origin: '@ana' });
+    app.router.go({ name: 'item', id: saved?.id ?? '' });
+
+    expect(await screen.findByText('@ana en TikTok')).toBeTruthy();
+    expect(screen.getByText('De TikTok, Stash guarda la vista previa y el enlace.')).toBeTruthy();
+    expect(screen.getAllByText(/Cómo ordenar la despensa #orden/).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('link', { name: /Abrir en TikTok/ })).toHaveLength(1);
+  });
+
+  it('should title a post on X with its text', async () => {
+    const device = await signedUpDevice();
+    const post = 'https://x.com/jack/status/20';
+    const oembed = JSON.stringify({
+      url: post,
+      author_name: 'jack',
+      author_url: 'https://x.com/jack',
+      html: '<blockquote class="twitter-tweet"><p lang="en" dir="ltr">just setting up my twttr</p>&mdash; jack (@jack) <a href="https://x.com/jack/status/20">March 21, 2006</a></blockquote>',
+    });
+    device.backend.pages.set(post, {
+      kind: 'x',
+      oembed: { url: post, contentType: 'application/json', body: oembed, truncated: false },
+      page: null,
+    });
+
+    const { saved } = await saveAndOpen(device, post);
+
+    expect(saved?.title).toBe('just setting up my twttr');
+  });
 });

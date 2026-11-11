@@ -93,6 +93,71 @@ describe('readExtract', () => {
     });
   });
 
+  describe('TikTok', () => {
+    const url = 'https://www.tiktok.com/@ana/video/7378294254344342827';
+    const state = {
+      __DEFAULT_SCOPE__: {
+        'webapp.video-detail': {
+          statusCode: 0,
+          itemInfo: {
+            itemStruct: {
+              desc: 'Cómo ordenar la despensa #orden',
+              createTime: '1717893006',
+              video: { cover: 'https://p16.example.com/cover.jpeg?x-expires=1' },
+              author: { uniqueId: 'ana', nickname: 'Ana' },
+            },
+          },
+        },
+      },
+    };
+    const page = `<html><head><title>TikTok - Make Your Day</title><script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">${JSON.stringify(state)}</script></head><body></body></html>`;
+    // What the official oEmbed answers today: an iframe and nothing else.
+    const stub = JSON.stringify({ version: '1.0', type: 'video', html: '<iframe></iframe>' });
+
+    it('should keep the caption, author and cover from the page state', () => {
+      const data: ExtractData = {
+        kind: 'tiktok',
+        oembed: doc(url, stub, 'application/json'),
+        page: doc(url, page),
+      };
+
+      const result = readExtract(data, url);
+
+      expect({
+        source: result.source,
+        preview: result.preview,
+        content: result.content,
+      }).toEqual({
+        source: 'tiktok',
+        preview: {
+          title: 'Cómo ordenar la despensa #orden',
+          description: 'Cómo ordenar la despensa #orden',
+          siteName: 'TikTok',
+          author: 'Ana',
+          imageUrl: 'https://p16.example.com/cover.jpeg?x-expires=1',
+          publishedAt: '2024-06-09T00:30:06.000Z',
+        },
+        content: { kind: 'none', text: '' },
+      });
+    });
+
+    it('should keep the link when the page was not downloaded', () => {
+      const data: ExtractData = {
+        kind: 'tiktok',
+        oembed: doc(url, stub, 'application/json'),
+        page: null,
+      };
+
+      expect(readExtract(data, url).preview?.title).toBeNull();
+    });
+
+    it('should keep the bare link when neither document arrived', () => {
+      const data: ExtractData = { kind: 'tiktok', oembed: null, page: null };
+
+      expect(readExtract(data, url)).toMatchObject({ source: 'tiktok', content: { kind: 'none' } });
+    });
+  });
+
   it('should degrade to the bare link when the data has the wrong shape', () => {
     const url = 'https://example.com/';
     const broken = { kind: 'web', page: { body: 42 } } as unknown as ExtractData;

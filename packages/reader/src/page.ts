@@ -12,6 +12,7 @@ import {
 } from './limits';
 import { sanitizeHtml } from './sanitize';
 import type { ReaderContent, ReaderIssue, ReaderResult, Source } from './types';
+import { parseTikTok } from './tiktok';
 import { sameSiteCanonical } from './url';
 import { parseXOembed } from './x';
 
@@ -86,6 +87,7 @@ function parseWithReadability(html: string, url: string, source: Source): Reader
  * - `x`: metadata only; the post text comes from `og:description`. Prefer `parseXOembed` when the
  *   oEmbed response is available.
  * - `instagram`: preview only (`content.kind = 'none'`).
+ * - `tiktok`: preview only, from the video state the page embeds (see `parseTikTok`).
  * - Over the limits (2 MiB of input, 20 000 elements or 100 levels of nesting): preview from the
  *   metadata, with the `too_large` issue. See `src/limits.ts`.
  *
@@ -94,9 +96,11 @@ function parseWithReadability(html: string, url: string, source: Source): Reader
  */
 export function parsePage(html: string, url: string): ReaderResult {
   if (typeof html !== 'string') throw new ReaderInputError('html must be a string');
-  return safely(url, (href, source) =>
-    source === 'x' ? parseXOembed(null, href, html) : parseWithReadability(html, href, source),
-  );
+  return safely(url, (href, source) => {
+    if (source === 'x') return parseXOembed(null, href, html);
+    if (source === 'tiktok') return parseTikTok(null, href, html);
+    return parseWithReadability(html, href, source);
+  });
 }
 
 /**
