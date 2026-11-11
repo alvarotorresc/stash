@@ -14,7 +14,7 @@ export const fetchWithoutCookies: typeof fetch = (input, init) =>
 
 export interface ExtensionStashOptions extends Pick<
   StashOptions,
-  'dataKeyStore' | 'cache' | 'isOnline'
+  'dataKeyStore' | 'cache' | 'isOnline' | 'makeThumbnail'
 > {
   /** `storage.local` of the extension. */
   area: StorageArea;
@@ -39,6 +39,8 @@ export function createExtensionStash(options: ExtensionStashOptions): Stash {
     ...(options.dataKeyStore && { dataKeyStore: options.dataKeyStore }),
     ...(options.cache && { cache: options.cache }),
     ...(options.isOnline && { isOnline: options.isOnline }),
+    // Unset: thumbnails exist where a DOM reads pages (the popup), never in the background.
+    ...(options.makeThumbnail !== undefined && { makeThumbnail: options.makeThumbnail }),
     // No window events in a service worker; the popup is short-lived and syncs when it opens.
     events: null,
   });

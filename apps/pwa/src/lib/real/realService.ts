@@ -1,4 +1,4 @@
-import type { Stash } from '@stash/client';
+import { createThumbnailUrls, type Stash } from '@stash/client';
 import { AccountApiError, CryptoError, checkPassword } from '@stash/core';
 import { SyncError, type ItemView } from '@stash/core/sync';
 import type { PasswordStrength } from '@stash/ui';
@@ -61,6 +61,15 @@ async function asAccount<T>(action: AccountAction, run: () => Promise<T>): Promi
 /** The recovery code without separators: the screen shows it in groups of four. */
 const plainCode = (code: string) => code.replace(/[\s-]/g, '');
 
+/** Standard base64 of some bytes, in chunks so a large array does not overflow the call stack. */
+function toBase64(bytes: Uint8Array): string {
+  let binary = '';
+  for (let start = 0; start < bytes.length; start += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(start, start + 0x8000));
+  }
+  return btoa(binary);
+}
+
 const fold = (value: string) => value.normalize('NFC').trim().toLocaleLowerCase();
 
 /** Strength meter from the core's password check: length and very common passwords. */
@@ -75,38 +84,13 @@ export function passwordStrength(password: string): PasswordStrength | null {
 }
 
 /**
- * Object URLs of the decrypted thumbnails, one per item, made once and revoked when
- * the image changes or the session ends. Only `blob:` URLs reach an `<img>`.
- */
-function thumbnailUrls() {
-  const urls = new Map<string, { bytes: Uint8Array; url: string }>();
-  return {
-    of(view: ItemView): string | undefined {
-      const current = urls.get(view.id);
-      if (current && current.bytes === view.thumbnail?.bytes) return current.url;
-      if (current) URL.revokeObjectURL(current.url);
-      urls.delete(view.id);
-      if (!view.thumbnail) return undefined;
-      const { bytes, type } = view.thumbnail;
-      const url = URL.createObjectURL(new Blob([bytes.slice()], { type }));
-      urls.set(view.id, { bytes, url });
-      return url;
-    },
-    clear() {
-      for (const { url } of urls.values()) URL.revokeObjectURL(url);
-      urls.clear();
-    },
-  };
-}
-
-/**
  * The screens' service over the real client: accounts, the encrypted sync and its
  * local cache, the extraction proxy and the reader. Reads come from the decrypted
  * copy in memory; every change goes through `stash.change`, one at a time.
  */
 export function createRealService(stash: Stash): StashService {
   const { sync } = stash;
-  const thumbnails = thumbnailUrls();
+  const thumbnails = createThumbnailUrls();
   let lastEmail: string | null = null;
 
   const item = (view: ItemView) => toItem(view, thumbnails.of(view));
@@ -172,7 +156,10 @@ export function createRealService(stash: Stash): StashService {
 
     async listItems() {
       await ready();
-      return sync.listItems().map(item);
+      const views = sync.listItems();
+      // Items deleted here or on another device leave no object URL behind.
+      thumbnails.keepOnly(new Set(views.map((view) => view.id)));
+      return views.map(item);
     },
 
     async getItem(id) {
@@ -261,6 +248,9 @@ export function createRealService(stash: Stash): StashService {
           tags: view.tags.map((tag) => tag.name),
           savedAt: new Date(view.savedAt).toISOString(),
           preview: view.preview,
+          thumbnail: view.thumbnail
+            ? { type: view.thumbnail.type, base64: toBase64(view.thumbnail.bytes) }
+            : null,
           text: view.content?.text ?? null,
         })),
         categories: sync.listCategories().map((entry) => entry.name),

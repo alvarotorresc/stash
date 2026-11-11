@@ -1,4 +1,4 @@
-import { createStash, type Stash } from '@stash/client';
+import { createStash, type Stash, type ThumbnailMaker } from '@stash/client';
 import { FakeBackend } from '@stash/client/testing';
 import { createIndexedDbDataKeyStore, createMemorySessionStore } from '@stash/core';
 import { createIndexedDbRecordCache } from '@stash/core/sync';
@@ -28,7 +28,11 @@ export async function renderApp(
 }
 
 /** The real client on one device, against the in-memory API. */
-export function realDevice(backend = new FakeBackend(), factory = new IDBFactory()) {
+export function realDevice(
+  backend = new FakeBackend(),
+  factory = new IDBFactory(),
+  makeThumbnail: ThumbnailMaker | null = null,
+) {
   const events = new EventTarget();
   const stash: Stash = createStash({
     baseUrl: 'https://stash.test',
@@ -38,6 +42,7 @@ export function realDevice(backend = new FakeBackend(), factory = new IDBFactory
     cache: createIndexedDbRecordCache({ indexedDB: factory }),
     isOnline: () => backend.online,
     events,
+    makeThumbnail,
   });
   return { backend, factory, events, stash, service: createRealService(stash) };
 }

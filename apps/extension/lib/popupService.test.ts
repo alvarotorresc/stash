@@ -1,3 +1,4 @@
+import type { ThumbnailMaker } from '@stash/client';
 import { webPage } from '@stash/client/testing';
 import { API_PATHS } from '@stash/core/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -30,12 +31,14 @@ const noTab: TabApi = {
 };
 
 /** The popup of an extension whose account exists on another device. */
-async function popup(options: { access?: boolean; tabApi?: TabApi } = {}) {
+async function popup(
+  options: { access?: boolean; tabApi?: TabApi; makeThumbnail?: ThumbnailMaker | null } = {},
+) {
   const device = profile();
   const phone = otherDevice(device.backend);
   opened.push(phone);
   await phone.register({ email: EMAIL, password: PASSWORD });
-  const stash = device.stash(true);
+  const stash = device.stash(true, options.makeThumbnail);
   opened.push(stash);
   const requestHostAccess = vi.fn(() => Promise.resolve(options.access ?? true));
   const pending = createBadgedPendingLinks(device.area, () => {});
@@ -45,7 +48,15 @@ async function popup(options: { access?: boolean; tabApi?: TabApi } = {}) {
     pending,
     requestHostAccess,
   });
-  return { ...device, phone, stash, service, pending, requestHostAccess };
+  return {
+    ...device,
+    phone,
+    stash,
+    service,
+    pending,
+    requestHostAccess,
+    contextStash: device.stash,
+  };
 }
 
 async function signedIn(options?: Parameters<typeof popup>[0]) {
@@ -397,5 +408,88 @@ describe('links picked from the menu while locked', () => {
 
     expect(await service.savePendingLinks()).toBe(0);
     expect(await pending.list()).toEqual([URL_A]);
+  });
+});
+
+describe('thumbnails', () => {
+  const IMAGE = 'https://cdn.example.com/cover.jpg';
+  const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 1]);
+  const make: ThumbnailMaker = async () => ({
+    type: 'image/webp',
+    bytes: new Uint8Array([1, 2, 3]),
+  });
+  const withImage = articleHtml('La despensa').replace(
+    '</head>',
+    `<meta property="og:image" content="${IMAGE}"></head>`,
+  );
+
+  it('should show the thumbnail of a saved page in the list and in the reading view', async () => {
+    const { service, stash, backend } = await signedIn({ makeThumbnail: make });
+    backend.images.set(IMAGE, { type: 'image/jpeg', bytes: JPEG });
+
+    const saved = await service.save({ url: URL_A, title: 'A', html: withImage });
+    await stash.idle();
+    const [listed] = await service.listItems();
+    const detail = await service.getItem(saved.id);
+
+    expect({
+      list: listed?.thumbnail.src?.startsWith('blob:'),
+      reading: detail?.thumbnail.src?.startsWith('blob:'),
+      imageRequests: backend.imagesFetched,
+    }).toEqual({ list: true, reading: true, imageRequests: [IMAGE] });
+  });
+
+  it('should keep the color tone for an item without thumbnail', async () => {
+    const { service, stash } = await signedIn({ makeThumbnail: make });
+    await service.save({ url: URL_A, title: 'A', html: articleHtml('La despensa') });
+    await stash.idle();
+
+    const [listed] = await service.listItems();
+
+    expect(listed?.thumbnail).toEqual({ tone: 1 });
+  });
+
+  it('should leave thumbnails to a context with a DOM: the background saves without one', async () => {
+    const { service, backend, stash, contextStash } = await signedIn({ makeThumbnail: make });
+    backend.images.set(IMAGE, { type: 'image/jpeg', bytes: JPEG });
+    backend.pages.set(URL_B, webPage(URL_B, 'Otoño', ['uno dos tres'], IMAGE));
+    const background = contextStash(false);
+    opened.push(background);
+    await background.start();
+    const saved = await background.save(URL_B);
+    await background.idle();
+    const beforeSync = {
+      requests: backend.imagesFetched.length,
+      thumbnail: background.sync.getItem(saved.id)?.thumbnail ?? null,
+    };
+
+    await stash.refresh();
+    await stash.idle();
+    const [listed] = await service.listItems();
+
+    expect({
+      beforeSync,
+      afterSync: listed?.thumbnail.src?.startsWith('blob:'),
+    }).toEqual({ beforeSync: { requests: 0, thumbnail: null }, afterSync: true });
+  });
+
+  it('should revoke the object URLs on logout', async () => {
+    const created: string[] = [];
+    const revoked: string[] = [];
+    vi.spyOn(URL, 'createObjectURL').mockImplementation(() => {
+      created.push(`blob:ext/${created.length + 1}`);
+      return created.at(-1) ?? '';
+    });
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation((url) => void revoked.push(url));
+    const { service, stash, backend } = await signedIn({ makeThumbnail: make });
+    backend.images.set(IMAGE, { type: 'image/jpeg', bytes: JPEG });
+    await service.save({ url: URL_A, title: 'A', html: withImage });
+    await stash.idle();
+    await service.listItems();
+
+    await service.logout();
+
+    expect({ created, revoked }).toEqual({ created: ['blob:ext/1'], revoked: ['blob:ext/1'] });
+    vi.restoreAllMocks();
   });
 });

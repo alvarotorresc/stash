@@ -12,13 +12,27 @@ import {
   SyncError,
   createIndexedDbRecordCache,
   createSyncClient,
+  type ItemView,
   type ReadResult,
   type RecordCache,
   type SavedLink,
   type SyncClient,
+  type Thumbnail,
 } from '@stash/core/sync';
-import { ExtractError, createExtractor, type Extractor } from './extract';
+import {
+  ExtractError,
+  createExtractor,
+  createImageFetcher,
+  type Extractor,
+  type ImageFetcher,
+} from './extract';
 import { readExtract, unreadableLink } from './read';
+import {
+  browserThumbnailsSupported,
+  createBrowserThumbnailCodec,
+  createThumbnailMaker,
+  type ThumbnailMaker,
+} from './thumbnail';
 
 export interface StashOptions {
   /** Origin of the API; empty for the same origin (the Worker serves the app). */
@@ -37,6 +51,13 @@ export interface StashOptions {
    * another context reads them later. Defaults to whether `DOMParser` exists.
    */
   readonly readPages?: boolean;
+  /**
+   * Reduces a downloaded preview image to the thumbnail kept with the item. It needs image
+   * decoding, so by default it exists only where pages are read and the browser can decode and
+   * draw (the PWA and the popup): the background of the extension saves links without thumbnail
+   * and a context with a DOM adds it on a later sync. `null` turns thumbnails off.
+   */
+  readonly makeThumbnail?: ThumbnailMaker | null;
   /** Where the connection events come from; defaults to `window` when there is one. */
   readonly events?: Pick<Window, 'addEventListener' | 'removeEventListener'> | null;
   readonly now?: () => number;
@@ -112,8 +133,21 @@ export interface Stash {
   dispose(): void;
 }
 
-/** Background reads per refresh, well under the proxy's limit of 60 every 10 minutes. */
-const MAX_READS_PER_REFRESH = 20;
+/**
+ * Background reads per refresh. Images share the proxy's limit of 60 requests every 10 minutes
+ * per account: a read makes up to two requests (page and image) and the backfill one each, so a
+ * refresh makes at most 15 x 2 + 10 = 40.
+ */
+const MAX_READS_PER_REFRESH = 15;
+/** Thumbnails added to items saved before this feature, per refresh. */
+const MAX_THUMBNAIL_FILLS_PER_REFRESH = 10;
+
+type BuiltThumbnail =
+  | { readonly state: 'ok'; readonly thumbnail: Thumbnail }
+  /** The image is unusable (gone, corrupt, too large, not allowed): asking again will not help. */
+  | { readonly state: 'failed' }
+  /** Offline, rate limited or the server failed: nothing was learned about the image. */
+  | { readonly state: 'transient' };
 
 function defaultIsOnline(): boolean {
   return typeof navigator === 'undefined' || navigator.onLine !== false;
@@ -179,11 +213,23 @@ export function createStash(options: StashOptions = {}): Stash {
       dataKey = null;
       opened = null;
       started = null;
+      attempted.clear();
       await sync.clear();
     },
   });
 
   const extract: Extractor = createExtractor({ baseUrl, fetch: fetchFn });
+  const fetchImage: ImageFetcher = createImageFetcher({ baseUrl, fetch: fetchFn });
+  const makeThumbnail: ThumbnailMaker | null =
+    options.makeThumbnail !== undefined
+      ? options.makeThumbnail
+      : readPages && browserThumbnailsSupported()
+        ? createThumbnailMaker(createBrowserThumbnailCodec())
+        : null;
+  /** Counts refreshes, so an item tried while saving is tried again on a later one, not at once. */
+  let round = 0;
+  /** Items whose thumbnail failed, with the refresh they failed in (in memory, per session). */
+  const attempted = new Map<string, number>();
 
   sync.subscribe(notify);
 
@@ -222,6 +268,66 @@ export function createStash(options: StashOptions = {}): Stash {
   }
 
   /**
+   * Downloads the preview image through the proxy and reduces it on the device. It never throws:
+   * whatever goes wrong the item stays as it is, without thumbnail.
+   */
+  async function buildThumbnail(
+    token: string,
+    imageUrl: string,
+    make: ThumbnailMaker,
+  ): Promise<BuiltThumbnail> {
+    try {
+      const thumbnail = await make(await fetchImage(token, imageUrl));
+      return thumbnail ? { state: 'ok', thumbnail } : { state: 'failed' };
+    } catch (error) {
+      return error instanceof ExtractError && !error.permanent
+        ? { state: 'transient' }
+        : { state: 'failed' };
+    }
+  }
+
+  /**
+   * Stores a read result. If the account has no room for the thumbnail the item is stored
+   * without it, and without the image address so it is not tried again: the item is never lost.
+   */
+  async function storeResult(id: string, result: ReadResult): Promise<void> {
+    try {
+      await change((client) => client.setReadResult(id, result));
+    } catch (error) {
+      const full = isSyncError(error, 'QUOTA_EXCEEDED') || isSyncError(error, 'TOO_LARGE');
+      if (!result.thumbnail || !full) throw error;
+      const { preview, content, source } = result;
+      await change((client) =>
+        client.setReadResult(id, {
+          ...(source && { source }),
+          preview: preview && { ...preview, imageUrl: null },
+          content,
+        }),
+      );
+    }
+  }
+
+  /**
+   * Gives a read result its thumbnail, made from the preview image. When the item already has
+   * one (a link read again), the image is only fetched again if its address changed; if the new
+   * one cannot be made the old thumbnail stays.
+   */
+  async function withThumbnail(
+    id: string,
+    token: string,
+    result: ReadResult,
+    existing: ItemView | null,
+  ): Promise<ReadResult> {
+    const imageUrl = result.preview?.imageUrl;
+    if (!makeThumbnail || !imageUrl) return result;
+    if (existing?.thumbnail && existing.preview?.imageUrl === imageUrl) return result;
+    const built = await buildThumbnail(token, imageUrl, makeThumbnail);
+    if (built.state === 'ok') return { ...result, thumbnail: built.thumbnail };
+    if (built.state === 'failed' && existing === null) attempted.set(id, round);
+    return result;
+  }
+
+  /**
    * Reads one link through the proxy and stores the result. Failures leave it for later. With
    * `again` the link is read although it already has a preview: whatever it had stays when the
    * new read fails or finds nothing.
@@ -233,7 +339,7 @@ export function createStash(options: StashOptions = {}): Stash {
     if (item === null || item.queued || (item.preview !== null && !again) || !token) return;
     reading.add(id);
     try {
-      let result;
+      let result: ReadResult;
       try {
         result = readExtract(await extract(token, item.url), item.url);
       } catch (error) {
@@ -241,7 +347,9 @@ export function createStash(options: StashOptions = {}): Stash {
         result = unreadableLink(item.url);
       }
       if (again && !readSomething(result)) return;
-      await change((client) => client.setReadResult(id, result));
+      // Right away: some covers (TikTok) are signed and stop working in about two days.
+      result = await withThumbnail(id, token, result, again ? item : null);
+      await storeResult(id, result);
     } catch {
       // Offline, deleted meanwhile or the server failed: the link stays saved and unread.
     } finally {
@@ -253,9 +361,65 @@ export function createStash(options: StashOptions = {}): Stash {
   async function refreshSaved(id: string, read: ReadResult | undefined): Promise<void> {
     if (read === undefined) return readItem(id, true);
     try {
-      await change((client) => client.setReadResult(id, read));
+      const token = (await account.getSession())?.token;
+      const item = sync.getItem(id);
+      if (!token || item === null) return;
+      await storeResult(id, await withThumbnail(id, token, read, item));
     } catch {
       // Offline or deleted meanwhile: the item keeps what it had.
+    }
+  }
+
+  /**
+   * Adds the thumbnail to an item that has its preview but no thumbnail. `final` is the last
+   * try: if the image fails again its address is dropped (one write, also for the other
+   * devices) so it is never asked for again. Returns `stop` when the network or the proxy is
+   * unavailable, so a batch does not keep knocking.
+   */
+  async function fillThumbnail(id: string, final: boolean): Promise<'done' | 'stop'> {
+    if (!makeThumbnail || reading.has(id)) return 'done';
+    const item = sync.getItem(id);
+    const token = (await account.getSession())?.token;
+    const preview = item?.preview;
+    const imageUrl = preview?.imageUrl;
+    if (!item || !preview || !token || item.queued || item.thumbnail !== null || !imageUrl) {
+      return 'done';
+    }
+    reading.add(id);
+    try {
+      const built = await buildThumbnail(token, imageUrl, makeThumbnail);
+      if (built.state === 'transient') return 'stop';
+      const { content } = item;
+      if (built.state === 'ok') {
+        await storeResult(id, { preview, content, thumbnail: built.thumbnail });
+      } else if (final) {
+        await storeResult(id, { preview: { ...preview, imageUrl: null }, content });
+      } else {
+        attempted.set(id, round);
+      }
+      return 'done';
+    } catch {
+      return 'stop';
+    } finally {
+      reading.delete(id);
+    }
+  }
+
+  /** Thumbnails for items saved without one, a few per refresh and each tried at most twice. */
+  async function backfillThumbnails(): Promise<void> {
+    if (!makeThumbnail || !isOnline()) return;
+    const missing = sync
+      .listItems()
+      .filter(
+        (item) =>
+          !item.queued &&
+          item.thumbnail === null &&
+          !!item.preview?.imageUrl &&
+          attempted.get(item.id) !== round,
+      )
+      .slice(0, MAX_THUMBNAIL_FILLS_PER_REFRESH);
+    for (const item of missing) {
+      if ((await fillThumbnail(item.id, true)) === 'stop') return;
     }
   }
 
@@ -269,12 +433,14 @@ export function createStash(options: StashOptions = {}): Stash {
 
   async function refresh(): Promise<void> {
     if (!(await session())) return;
+    round += 1;
     try {
       await guard(() => sync.sync());
     } catch {
       // Offline or the server failed: the cache still shows everything.
     }
     await readUnread();
+    await backfillThumbnails();
   }
 
   function open(): Promise<void> {
@@ -386,7 +552,11 @@ export function createStash(options: StashOptions = {}): Stash {
     async save(url, { read } = {}) {
       await open();
       const item = await guard(() => sync.saveLink(read ? { url, ...read } : { url }));
-      if (!item.queued && !read && !item.alreadySaved) void track(readItem(item.id));
+      if (!item.queued && !item.alreadySaved) {
+        // Already read (the extension read the tab): only the image is missing.
+        if (!read) void track(readItem(item.id));
+        else if (item.preview?.imageUrl) void track(fillThumbnail(item.id, false));
+      }
       if (item.alreadySaved && !item.queued && isOnline()) void track(refreshSaved(item.id, read));
       return item;
     },

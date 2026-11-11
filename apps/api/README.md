@@ -55,10 +55,15 @@ with the User-Agent below:
   added. `hostIs(url, 'tiktok.com')` only chooses the adapter, and the URLs sent to TikTok are built
   from the account and the id, never from the rest of the link.
 - **Images.** The covers are served by `pbs.twimg.com` (stable) and by TikTok's CDN (signed, they
-  expire in about two days), and `POST /api/extract/image` can download both. The client does not
-  call it yet: until encrypted thumbnails are saved (a separate feature), `preview.imageUrl` is
-  stored as data and no image is shown. When thumbnails arrive, TikTok covers must be downloaded
-  when the link is saved.
+  expire in about two days), and `POST /api/extract/image` downloads both. The client asks for it
+  right after reading a link, reduces the image on the device and keeps it encrypted inside the
+  item, so the app never loads an image from a third party. The proxy accepts only JPEG, PNG,
+  WebP, GIF and AVIF (declared type and first bytes must agree; never SVG), at most 5 MiB.
+  Images count in the same `extract` limits as pages (60 every 10 minutes per account, 6 000 a
+  day for all), so a save with an image uses two of them. Those limits already bound the D1 cost
+  of extraction (2 rows each), so the write budget below does not change; the thumbnail travels in
+  the write that stores the read result, and filling an older item is one more record write, at
+  most 10 per sync and about 3 rows each, inside the `recordsPush` caps.
 
 ### User-Agent
 

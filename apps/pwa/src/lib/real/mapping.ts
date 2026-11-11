@@ -59,6 +59,7 @@ export function toItem(view: ItemView, thumbnail?: string): Item {
     tags: view.tags.map((tag) => tag.name),
     status: view.status,
     savedAt: view.savedAt,
+    statusChangedAt: view.statusChangedAt,
     queued: view.queued,
     thumbnail: thumbnail ? { src: thumbnail, tone: toneOf(view.id) } : { tone: toneOf(view.id) },
   };

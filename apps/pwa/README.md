@@ -85,6 +85,18 @@ Android supports it. Firefox for Android ignores `share_target`.
 What each app sends is not documented anywhere official; the table is what is expected and the test
 on the phone is what settles it.
 
+### Thumbnails and order
+
+- The list and the reading view show the decrypted thumbnail from a `blob:` URL created in memory
+  (the CSP allows `img-src 'self' blob: data:`). The URLs are kept by the service, shared by every
+  screen, and revoked when the image changes, the item is deleted or the session ends; there is
+  no image request to a third party, so `connect-src` stays `'self'`. Without a thumbnail the row
+  keeps its color tone.
+- Under Leídos and Descartados items are ordered by when their state last changed
+  (`statusChangedAt`), newest first; an item that never recorded a change falls back to its saved
+  date.
+- Export includes each thumbnail as `{ type, base64 }`, or `null`.
+
 ### Debugging
 
 - Connect the phone by USB, enable USB debugging and open `chrome://inspect` on the computer to see
