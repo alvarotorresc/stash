@@ -1,5 +1,5 @@
 import type { Stash } from '@stash/client';
-import { readHtml } from '@stash/client';
+import { createThumbnailUrls, readHtml } from '@stash/client';
 import { AccountApiError } from '@stash/core';
 import type { ItemView } from '@stash/core/sync';
 import { sanitizeStoredHtml } from '@stash/reader';
@@ -52,13 +52,14 @@ const host = (url: string) => {
   return parsed ? new URL(parsed).hostname.replace(/^www\./, '') : '';
 };
 
-function toListed(view: ItemView): ListedItem {
+/** The decrypted thumbnail as an object URL when there is one, the color tone otherwise. */
+function toListed(view: ItemView, src: string | undefined): ListedItem {
   return {
     id: view.id,
     title: view.title,
     origin: host(view.url),
     queued: view.queued,
-    thumbnail: { tone: 1 },
+    thumbnail: src ? { src, tone: 1 } : { tone: 1 },
   };
 }
 
@@ -105,6 +106,8 @@ function toContent(view: ItemView): ReadingContent {
 export function createPopupService(deps: PopupServiceDeps): PopupService {
   const { stash, tabApi, pending, requestHostAccess } = deps;
   let lastEmail: string | null = null;
+  /** Object URLs of the thumbnails: in memory only, revoked on logout and for deleted items. */
+  const thumbnails = createThumbnailUrls();
 
   /** The decrypted copy is ready once the cache is open. */
   const ready = () => stash.start();
@@ -136,6 +139,7 @@ export function createPopupService(deps: PopupServiceDeps): PopupService {
 
     async logout() {
       await stash.logout();
+      thumbnails.clear();
       await pending.clear();
       lastEmail = null;
     },
@@ -192,11 +196,12 @@ export function createPopupService(deps: PopupServiceDeps): PopupService {
 
     async listItems() {
       await ready();
-      return stash.sync
-        .listItems()
+      const views = stash.sync.listItems();
+      thumbnails.keepOnly(new Set(views.map((view) => view.id)));
+      return views
         .filter((view) => view.status === 'pending')
         .slice(0, MAX_LISTED)
-        .map(toListed);
+        .map((view) => toListed(view, thumbnails.of(view)));
     },
 
     async getItem(id): Promise<ItemDetail | null> {
@@ -204,7 +209,7 @@ export function createPopupService(deps: PopupServiceDeps): PopupService {
       const view = stash.sync.getItem(id);
       const url = view && toHttpUrl(view.url);
       if (!view || !url) return null;
-      return { ...toListed(view), url, content: toContent(view) };
+      return { ...toListed(view, thumbnails.of(view)), url, content: toContent(view) };
     },
   };
 }

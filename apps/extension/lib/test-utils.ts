@@ -1,4 +1,4 @@
-import { createStash, type Stash } from '@stash/client';
+import { createStash, type Stash, type ThumbnailMaker } from '@stash/client';
 import { FakeBackend } from '@stash/client/testing';
 import { createIndexedDbDataKeyStore, createMemorySessionStore } from '@stash/core';
 import { createIndexedDbRecordCache } from '@stash/core/sync';
@@ -34,10 +34,11 @@ export function profile(backend = new FakeBackend()) {
   const area = memoryArea();
   const factory = new IDBFactory();
   /** A client as a context of the extension (the popup or the background) creates it. */
-  const stash = (readPages: boolean): Stash =>
+  const stash = (readPages: boolean, makeThumbnail?: ThumbnailMaker | null): Stash =>
     createExtensionStash({
       area,
       readPages,
+      ...(makeThumbnail !== undefined && { makeThumbnail }),
       baseUrl: BASE_URL,
       fetch: backend.fetch,
       dataKeyStore: createIndexedDbDataKeyStore({ indexedDB: factory }),
