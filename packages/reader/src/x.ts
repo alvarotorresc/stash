@@ -74,6 +74,12 @@ function handleFrom(authorUrl: string | null): string | null {
   return handle ? `@${handle}` : null;
 }
 
+/** The link t.co puts at the end of a post that has media: "pic.twitter.com/…". */
+const MEDIA_LINK_TEXT = /^pic\.(?:twitter|x)\.com\//i;
+
+/** Longest title taken from the text of a post. */
+const MAX_TITLE = 120;
+
 function readTweet(
   oembed: XOembed,
   url: string,
@@ -86,6 +92,9 @@ function readTweet(
   const paragraph = blockquote.querySelector('p');
   const links = blockquote.querySelectorAll(':scope > a');
   const publishedAt = parseOembedDate(links[links.length - 1]?.textContent);
+  for (const link of Array.from(paragraph?.querySelectorAll('a') ?? [])) {
+    if (MEDIA_LINK_TEXT.test(link.textContent?.trim() ?? '')) link.remove();
+  }
   const html = paragraph ? sanitizeHtml(paragraph.innerHTML, url) : '';
   return { ...buildContent(html, 'tweet'), publishedAt };
 }
@@ -104,6 +113,14 @@ function isOversizedOembed(value: unknown): boolean {
 function oembedCanonical(value: string | null | undefined, url: string): string | null {
   const resolved = resolveHttpUrl(value, url);
   return resolved && detectSource(resolved) === 'x' ? resolved : null;
+}
+
+/**
+ * The image of the page, unless it is the author's avatar: X puts it in `og:image` when the post
+ * has no media, and a small avatar says nothing about the post.
+ */
+function postImage(imageUrl: string | null): string | null {
+  return imageUrl && !new URL(imageUrl).pathname.includes('/profile_images/') ? imageUrl : null;
 }
 
 const EMPTY_META: PageMeta = {
@@ -161,11 +178,13 @@ export function parseXOembed(oembed: unknown, url: string, pageHtml?: string): R
       source,
       url: href,
       canonicalUrl: oembedCanonical(data?.url, href) ?? sameSiteCanonical(meta.canonicalUrl, href),
-      title: meta.title ?? fallbackTitle,
+      // The title of the page is always "Name (@handle) on X": the text identifies the post, and
+      // the origin line already shows the account.
+      title: cleanText(content.text, MAX_TITLE) ?? meta.title ?? fallbackTitle,
       description: meta.description ?? excerpt(content.text),
       author: author ?? meta.author,
       siteName: meta.siteName ?? 'X',
-      imageUrl: meta.imageUrl,
+      imageUrl: postImage(meta.imageUrl),
       publishedAt: tweet?.publishedAt ?? meta.publishedAt,
       content,
       issues: [...issues],
