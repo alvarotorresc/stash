@@ -141,6 +141,31 @@ describe('readExtract', () => {
       });
     });
 
+    it('should give the address the proxy resolved a short link to', () => {
+      const short = 'https://vm.tiktok.com/ZMabc/';
+      const canonical = 'https://www.tiktok.com/@ana/video/7378294254344342827';
+      const data: ExtractData = {
+        kind: 'tiktok',
+        oembed: doc(canonical, stub, 'application/json'),
+        page: doc(canonical, page),
+      };
+
+      expect([
+        readExtract(data, short).canonicalUrl,
+        readExtract(data, canonical).canonicalUrl,
+      ]).toEqual([canonical, undefined]);
+    });
+
+    it('should not take as canonical a page that is not a video of TikTok', () => {
+      const data: ExtractData = {
+        kind: 'tiktok',
+        oembed: null,
+        page: doc('https://evil.example.com/@ana/video/7', page),
+      };
+
+      expect(readExtract(data, 'https://vm.tiktok.com/ZMabc/').canonicalUrl).toBeUndefined();
+    });
+
     it('should keep the link when the page was not downloaded', () => {
       const data: ExtractData = {
         kind: 'tiktok',

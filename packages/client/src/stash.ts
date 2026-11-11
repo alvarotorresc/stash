@@ -90,8 +90,11 @@ export interface Stash {
   /**
    * Saves a link at once (queued without connection or when the server fails) and reads it in
    * the background: the save never waits for the page and is never lost because of it. A link
-   * already saved creates nothing and is not read again: the existing item comes back with
-   * `alreadySaved: true`.
+   * already saved creates nothing: the existing item comes back with `alreadySaved: true` and its
+   * page is read again in the background (the given `read`, or the proxy), which refreshes its
+   * preview and content but not its category, priority, tags or status. The new read counts
+   * against the extraction limit and as one edit, like any other. Offline, or while the item
+   * still waits in the queue, nothing is read: the refresh is not queued.
    */
   save(url: string, options?: SaveOptions): Promise<SavedLink>;
   /**
@@ -114,6 +117,11 @@ const MAX_READS_PER_REFRESH = 20;
 
 function defaultIsOnline(): boolean {
   return typeof navigator === 'undefined' || navigator.onLine !== false;
+}
+
+/** Whether a read found anything to show: a bare link has no title, description or text. */
+function readSomething({ preview, content }: ReadResult): boolean {
+  return !!(preview?.title || preview?.description || content?.text);
 }
 
 function isSyncError(error: unknown, code: SyncError['code']): boolean {
@@ -213,26 +221,41 @@ export function createStash(options: StashOptions = {}): Stash {
     return next;
   }
 
-  /** Reads one link through the proxy and stores the result. Failures leave it for later. */
-  async function readItem(id: string): Promise<void> {
+  /**
+   * Reads one link through the proxy and stores the result. Failures leave it for later. With
+   * `again` the link is read although it already has a preview: whatever it had stays when the
+   * new read fails or finds nothing.
+   */
+  async function readItem(id: string, again = false): Promise<void> {
     if (!readPages || reading.has(id)) return;
     const item = sync.getItem(id);
     const token = (await account.getSession())?.token;
-    if (item === null || item.queued || item.preview !== null || !token) return;
+    if (item === null || item.queued || (item.preview !== null && !again) || !token) return;
     reading.add(id);
     try {
       let result;
       try {
         result = readExtract(await extract(token, item.url), item.url);
       } catch (error) {
-        if (!(error instanceof ExtractError) || !error.permanent) return;
+        if (again || !(error instanceof ExtractError) || !error.permanent) return;
         result = unreadableLink(item.url);
       }
+      if (again && !readSomething(result)) return;
       await change((client) => client.setReadResult(id, result));
     } catch {
       // Offline, deleted meanwhile or the server failed: the link stays saved and unread.
     } finally {
       reading.delete(id);
+    }
+  }
+
+  /** Reads a link that was saved again (see `Stash.save`). Failures leave it as it was. */
+  async function refreshSaved(id: string, read: ReadResult | undefined): Promise<void> {
+    if (read === undefined) return readItem(id, true);
+    try {
+      await change((client) => client.setReadResult(id, read));
+    } catch {
+      // Offline or deleted meanwhile: the item keeps what it had.
     }
   }
 
@@ -363,7 +386,8 @@ export function createStash(options: StashOptions = {}): Stash {
     async save(url, { read } = {}) {
       await open();
       const item = await guard(() => sync.saveLink(read ? { url, ...read } : { url }));
-      if (!read && !item.queued && !item.alreadySaved) void track(readItem(item.id));
+      if (!item.queued && !read && !item.alreadySaved) void track(readItem(item.id));
+      if (item.alreadySaved && !item.queued && isOnline()) void track(refreshSaved(item.id, read));
       return item;
     },
 

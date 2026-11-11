@@ -225,7 +225,9 @@ are checked against the measured costs too, so a schema change that makes a reco
 fails until the weights follow.
 
 What fits in a day: about 3 000 saves or edits pushed one by one for every account together, or
-6 000 operations in batches, and 750 single saves for one account. A few people saving and
+6 000 operations in batches, and 750 single saves for one account. Saving a link that was already
+saved reads it again (one extraction and, if the read finds something new, one edit), so it costs
+the same as saving it the first time. A few people saving and
 sorting tens or hundreds of items a day each stay well inside it. Spent, nobody can push until
 00:00 UTC; pulls and the local copy keep working. A first upload of a full account (5 000
 records, about 20 000 rows) takes four days at the per-account cap.
