@@ -4,6 +4,7 @@ import {
   minimalResult,
   parsePage,
   parseRedditRss,
+  parseTikTok,
   parseXOembed,
   type ReaderResult,
 } from '@stash/reader';
@@ -19,6 +20,8 @@ function parse(data: ExtractData, url: string): ReaderResult {
       return parseXOembed(data.oembed?.body ?? null, url, data.page?.body);
     case 'instagram':
       return data.page ? parsePage(data.page.body, url) : minimalResult(url);
+    case 'tiktok':
+      return parseTikTok(data.oembed?.body ?? null, url, data.page?.body);
   }
 }
 

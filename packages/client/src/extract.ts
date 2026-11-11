@@ -40,7 +40,7 @@ export interface ExtractorOptions {
 
 export type Extractor = (token: string, url: string) => Promise<ExtractData>;
 
-const KINDS: ReadonlySet<string> = new Set(['web', 'reddit', 'x', 'instagram']);
+const KINDS: ReadonlySet<string> = new Set(['web', 'reddit', 'x', 'instagram', 'tiktok']);
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;

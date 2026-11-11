@@ -1,12 +1,12 @@
 /** Where a saved link comes from. Used for filters and to pick a parser. */
-export type Source = 'web' | 'reddit' | 'x' | 'instagram';
+export type Source = 'web' | 'reddit' | 'x' | 'instagram' | 'tiktok';
 
 /**
  * What kind of readable content was extracted.
  * - `article`: reader mode of a web page.
  * - `post`: the text of a Reddit post (never its comments).
  * - `tweet`: the text of a post on X.
- * - `none`: preview only (title, description, image, link).
+ * - `none`: preview only (title, description, image, link). Instagram and TikTok always.
  */
 export type ContentKind = 'article' | 'post' | 'tweet' | 'none';
 

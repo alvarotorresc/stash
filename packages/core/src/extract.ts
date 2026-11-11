@@ -59,8 +59,20 @@ export interface InstagramExtract {
   page: FetchedDocument | null;
 }
 
+/**
+ * TikTok video: the official oEmbed JSON and the HTML of the video page (the state it embeds has
+ * the caption, author and cover). Either can be null if that download failed; never both. For a
+ * share link (`vm.tiktok.com`, `vt.tiktok.com`, `tiktok.com/t/…`) the proxy first follows the
+ * redirect to the video; the documents are those of the video.
+ */
+export interface TikTokExtract {
+  kind: 'tiktok';
+  oembed: FetchedDocument | null;
+  page: FetchedDocument | null;
+}
+
 /** `data` of a successful `POST /api/extract`, discriminated by `kind`. */
-export type ExtractData = WebExtract | RedditExtract | XExtract | InstagramExtract;
+export type ExtractData = WebExtract | RedditExtract | XExtract | InstagramExtract | TikTokExtract;
 
 export type ExtractKind = ExtractData['kind'];
 

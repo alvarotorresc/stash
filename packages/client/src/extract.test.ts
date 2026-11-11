@@ -40,6 +40,14 @@ describe('createExtractor', () => {
     });
   });
 
+  it('should accept the TikTok answer', async () => {
+    const extract = createExtractor({
+      fetch: async () => Response.json({ data: { kind: 'tiktok', oembed: null, page: null } }),
+    });
+
+    expect((await extract('t', URL_A)).kind).toBe('tiktok');
+  });
+
   it('should fail with NETWORK_ERROR without connection, which is worth retrying', async () => {
     const extract = createExtractor({
       fetch: () => Promise.reject(new TypeError('Failed to fetch')),
@@ -70,7 +78,7 @@ describe('createExtractor', () => {
       fetch: async () => new Response('<html>not json</html>', { status: 200 }),
     });
     const unknownKind = createExtractor({
-      fetch: async () => Response.json({ data: { kind: 'tiktok' } }),
+      fetch: async () => Response.json({ data: { kind: 'mastodon' } }),
     });
 
     expect([
