@@ -10,7 +10,7 @@ if (!target) {
   throw new Error('Missing #app element');
 }
 
-// The service is picked in lib/services: example data in memory until accounts and sync exist.
+// The real client for the popup is built in lib/services.
 mount(App, {
   target,
   props: { service: createPopupService(browser), onclose: () => window.close() },

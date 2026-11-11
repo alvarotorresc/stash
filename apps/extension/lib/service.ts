@@ -1,9 +1,9 @@
-import type { PasswordStrength, Priority, TagSuggestion, Tone } from '@stash/ui';
+import type { Priority, SanitizedHtml, TagSuggestion, Tone } from '@stash/ui';
 
 /**
- * What the popup and the background need from Stash. Smaller than the PWA's
- * service: the popup only signs in, saves the open page and classifies it.
- * The in-memory mock implements it today; the real client comes later.
+ * What the popup needs from Stash. Smaller than the PWA's service: the popup signs in, saves
+ * the open page, classifies it and lists and reads what is saved. `popupService.ts` implements
+ * it over the real client; `mock.ts` is an in-memory example for the component tests.
  */
 
 export interface MetaTag {
@@ -42,7 +42,35 @@ export interface Classification {
   tags?: string[];
 }
 
-export type AccountErrorCode = 'invalid-credentials' | 'email-taken' | 'weak-password' | 'offline';
+/** An item just saved: `alreadySaved` when that link was already in Stash and nothing was created. */
+export interface SaveResult extends SavedItem {
+  alreadySaved: boolean;
+}
+
+/** A saved link as the list shows it. */
+export interface ListedItem {
+  id: string;
+  title: string;
+  /** Domain, subreddit or account shown under the title. */
+  origin: string;
+  /** Saved without connection and waiting to upload. */
+  queued: boolean;
+  thumbnail: { src?: string; tone: Tone };
+}
+
+/** What the reading view shows, by what could be read of the page. */
+export type ReadingContent =
+  | { kind: 'article'; meta: string; html: SanitizedHtml }
+  | { kind: 'preview'; description?: string }
+  | { kind: 'none' };
+
+export interface ItemDetail extends ListedItem {
+  /** An http(s) address: the only kind that may become an `href`. */
+  url: string;
+  content: ReadingContent;
+}
+
+export type AccountErrorCode = 'invalid-credentials' | 'rate-limited' | 'offline' | 'no-access';
 
 export class AccountError extends Error {
   readonly code: AccountErrorCode;
@@ -55,19 +83,27 @@ export class AccountError extends Error {
 }
 
 export interface PopupService {
+  /** The session when the data key is unlocked too; null means "ask for the password". */
   getSession(): Promise<{ email: string } | null>;
   lastEmail(): string | null;
-  passwordStrength(password: string): PasswordStrength | null;
   login(email: string, password: string): Promise<void>;
-  /** Creates the account and signs in. Returns the recovery code, shown once. */
-  register(email: string, password: string): Promise<{ recoveryCode: string }>;
+  /** Closes the session and forgets the data key, the cache, the queue and waiting links. */
+  logout(): Promise<void>;
   /** The page open in the active tab, or null when there is none. */
   currentTab(): Promise<Page | null>;
-  save(page: Page): Promise<SavedItem>;
+  save(page: Page): Promise<SaveResult>;
+  /**
+   * Saves the links picked from the context menu while there was no session, and returns how
+   * many it saved. A link that fails stays for the next time.
+   */
+  savePendingLinks(): Promise<number>;
   classify(id: string, change: Classification): Promise<void>;
   listCategories(): Promise<{ id: string; name: string }[]>;
   /** Tags already used, most used first. */
   listTags(): Promise<TagSuggestion[]>;
+  /** Links still to read, newest first. */
+  listItems(): Promise<ListedItem[]>;
+  getItem(id: string): Promise<ItemDetail | null>;
 }
 
 /** The value as an http(s) URL, or null: only web pages are saved. */

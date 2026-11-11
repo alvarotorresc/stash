@@ -1,18 +1,24 @@
-import type { PasswordStrength } from '@stash/ui';
-import { AccountError, type Page, type PopupService, type SavedItem } from './service';
+import type { SanitizedHtml } from '@stash/ui';
+import {
+  AccountError,
+  type ItemDetail,
+  type Page,
+  type PopupService,
+  type SavedItem,
+} from './service';
 
 /** In-memory popup service with example data. Nothing leaves the extension. */
 
 export interface MockPopupOptions {
   signedIn?: boolean;
+  /** Links picked from the context menu while signed out. */
+  pendingLinks?: string[];
   /** The page in the active tab. */
   tab?: Page | null;
   latency?: number;
 }
 
 const ACCOUNT = { email: 'maria@ejemplo.com', password: 'calabaza-asada-2026' };
-const COMMON = new Set(['1234567890', 'password123', 'qwertyuiop', 'contraseña']);
-const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
 export const EXAMPLE_TAB: Page = {
   url: 'https://lacocinaordenada.es/organizar-la-despensa',
@@ -26,6 +32,7 @@ export function createMockPopupService(options: MockPopupOptions = {}): PopupSer
     (options.signedIn ?? true) ? { email: ACCOUNT.email } : null;
   const tab = options.tab === undefined ? EXAMPLE_TAB : options.tab;
   const items: SavedItem[] = [];
+  const pendingLinks = [...(options.pendingLinks ?? [])];
   const categories = [
     { id: 'cat-trabajo', name: 'Trabajo' },
     { id: 'cat-casa', name: 'Casa' },
@@ -43,24 +50,12 @@ export function createMockPopupService(options: MockPopupOptions = {}): PopupSer
   const wait = () =>
     latency > 0 ? new Promise<void>((resolve) => setTimeout(resolve, latency)) : Promise.resolve();
 
-  function strength(password: string): PasswordStrength | null {
-    if (!password) return null;
-    if (COMMON.has(password.toLowerCase())) {
-      return { level: 0, blocked: true, message: 'Muy común: elige otra' };
-    }
-    if (password.length < 10) return { level: 1, blocked: false, message: 'Mínimo 10 caracteres' };
-    if (password.length < 14) return { level: 2, blocked: false, message: 'Aceptable' };
-    if (password.length < 18) return { level: 3, blocked: false, message: 'Buena' };
-    return { level: 4, blocked: false, message: 'Muy buena' };
-  }
-
-  return {
+  const service: PopupService = {
     async getSession() {
       await wait();
       return session;
     },
     lastEmail: () => session?.email ?? null,
-    passwordStrength: strength,
     async login(email, password) {
       await wait();
       const account = accounts.find((a) => a.email === email.trim().toLowerCase());
@@ -69,20 +64,16 @@ export function createMockPopupService(options: MockPopupOptions = {}): PopupSer
       }
       session = { email: account.email };
     },
-    async register(email, password) {
+    async logout() {
       await wait();
-      const normalized = email.trim().toLowerCase();
-      const result = strength(password);
-      if (password.length < 10 || !result || result.blocked) {
-        throw new AccountError('weak-password');
-      }
-      if (accounts.some((a) => a.email === normalized)) throw new AccountError('email-taken');
-      accounts.push({ email: normalized, password });
-      session = { email: normalized };
-      const bytes = crypto.getRandomValues(new Uint8Array(28));
-      return {
-        recoveryCode: [...bytes].map((b) => CODE_ALPHABET[b % CODE_ALPHABET.length]).join(''),
-      };
+      session = null;
+      pendingLinks.length = 0;
+    },
+    async savePendingLinks() {
+      await wait();
+      const count = pendingLinks.length;
+      for (const url of pendingLinks.splice(0)) await service.save({ url, title: url });
+      return count;
     },
     async currentTab() {
       await wait();
@@ -91,7 +82,7 @@ export function createMockPopupService(options: MockPopupOptions = {}): PopupSer
     async save(page) {
       await wait();
       const existing = items.find((item) => item.url === page.url);
-      if (existing) return { ...existing };
+      if (existing) return { ...existing, alreadySaved: true };
       const url = new URL(page.url);
       const item: SavedItem = {
         id: `item-${items.length + 1}`,
@@ -104,7 +95,7 @@ export function createMockPopupService(options: MockPopupOptions = {}): PopupSer
         thumbnail: { tone: 1 },
       };
       items.push(item);
-      return { ...item };
+      return { ...item, alreadySaved: false };
     },
     async classify(id, change) {
       await wait();
@@ -113,6 +104,34 @@ export function createMockPopupService(options: MockPopupOptions = {}): PopupSer
       if (change.priority !== undefined) item.priority = change.priority;
       if (change.categoryId !== undefined) item.categoryId = change.categoryId;
       if (change.tags !== undefined) item.tags = [...change.tags];
+    },
+    async listItems() {
+      await wait();
+      return items.map((item) => ({
+        id: item.id,
+        title: item.title,
+        origin: item.domain,
+        queued: false,
+        thumbnail: item.thumbnail,
+      }));
+    },
+    async getItem(id): Promise<ItemDetail | null> {
+      await wait();
+      const item = items.find((candidate) => candidate.id === id);
+      if (!item) return null;
+      return {
+        id: item.id,
+        title: item.title,
+        origin: item.domain,
+        queued: false,
+        thumbnail: item.thumbnail,
+        url: item.url,
+        content: {
+          kind: 'article',
+          meta: `${item.domain} · 1 min`,
+          html: '<p>Texto de ejemplo del artículo.</p>' as SanitizedHtml,
+        },
+      };
     },
     async listCategories() {
       await wait();
@@ -123,4 +142,5 @@ export function createMockPopupService(options: MockPopupOptions = {}): PopupSer
       return tags.map((tag) => ({ ...tag }));
     },
   };
+  return service;
 }

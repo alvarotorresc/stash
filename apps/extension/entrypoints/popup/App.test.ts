@@ -1,6 +1,7 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
+import { fireEvent, render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
-import { createMockPopupService, type MockPopupOptions } from '../../lib/mock';
+import { createMockPopupService, EXAMPLE_TAB, type MockPopupOptions } from '../../lib/mock';
+import { AccountError } from '../../lib/service';
 import App from './App.svelte';
 
 function renderPopup(options: MockPopupOptions = {}) {
@@ -117,59 +118,177 @@ describe('Popup without a session', () => {
     expect(await screen.findByText('Guardado')).toBeTruthy();
   });
 
-  it('should create the account in the popup and show the recovery code', async () => {
-    const writeText = vi.fn(() => Promise.resolve());
-    Object.assign(navigator, { clipboard: { writeText } });
-    Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:x'), revokeObjectURL: vi.fn() });
-    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+  it('should send people without an account to the web app to create one', async () => {
     renderPopup({ signedIn: false });
-    await fireEvent.click(await screen.findByRole('button', { name: 'Crear cuenta' }));
 
+    const link = await screen.findByRole('link', { name: 'Créala en la web de Stash' });
+
+    expect({ href: link.getAttribute('href'), rel: link.getAttribute('rel') }).toEqual({
+      href: 'https://stash.alvarotc.com',
+      rel: 'noopener noreferrer',
+    });
+  });
+
+  it.each([
+    ['rate-limited', 'Demasiados intentos'],
+    ['offline', 'Sin conexión'],
+    ['no-access', 'necesita permiso'],
+  ] as const)('should explain a %s failure on sign in', async (code, text) => {
+    const service = createMockPopupService({ signedIn: false });
+    service.login = () => Promise.reject(new AccountError(code));
+    render(App, { service, onclose: () => {} });
+    await screen.findByLabelText('Email');
     await type('Email', 'maria@ejemplo.com');
-    await type('Contraseña', 'password123');
-    expect(screen.getByText('Muy común: elige otra')).toBeTruthy();
-    await fireEvent.click(screen.getByRole('button', { name: 'Crear cuenta' }));
-    expect(screen.getByRole('alert').textContent).toMatch(/al menos 10 caracteres/);
+    await type('Contraseña', 'calabaza-asada-2026');
 
-    await type('Contraseña', 'una frase bastante larga');
-    await fireEvent.click(screen.getByRole('button', { name: 'Crear cuenta' }));
-    expect(await screen.findByText(/Ese email ya tiene cuenta/)).toBeTruthy();
+    await fireEvent.click(await screen.findByRole('button', { name: 'Entrar' }));
 
-    await type('Email', 'nuevo@ejemplo.com');
-    await fireEvent.click(screen.getByRole('button', { name: 'Crear cuenta' }));
-    const heading = await screen.findByRole('heading', { name: 'Tu código de recuperación' });
-    const screenEl = heading.closest('section') as HTMLElement;
-    await fireEvent.click(within(screenEl).getByRole('button', { name: 'Copiar' }));
-    await waitFor(() => expect(writeText).toHaveBeenCalledOnce());
-    await fireEvent.click(within(screenEl).getByRole('button', { name: 'Descargar' }));
-    expect(click).toHaveBeenCalledOnce();
-    await fireEvent.click(within(screenEl).getByRole('checkbox'));
-    await fireEvent.click(within(screenEl).getByRole('button', { name: 'Continuar' }));
+    expect((await screen.findByRole('alert')).textContent).toContain(text);
+  });
+
+  it('should say something went wrong on an unexpected failure', async () => {
+    const service = createMockPopupService({ signedIn: false });
+    service.login = () => Promise.reject(new Error('boom'));
+    render(App, { service, onclose: () => {} });
+    await screen.findByLabelText('Email');
+    await type('Email', 'maria@ejemplo.com');
+    await type('Contraseña', 'calabaza-asada-2026');
+
+    await fireEvent.click(await screen.findByRole('button', { name: 'Entrar' }));
+
+    expect((await screen.findByRole('alert')).textContent).toContain('Algo ha fallado');
+  });
+
+  it('should fill in the email of the last session', async () => {
+    const service = createMockPopupService({ signedIn: false });
+    service.lastEmail = () => 'maria@ejemplo.com';
+    render(App, { service, onclose: () => {} });
+
+    expect(((await screen.findByLabelText('Email')) as HTMLInputElement).value).toBe(
+      'maria@ejemplo.com',
+    );
+  });
+});
+
+describe('Popup saved links', () => {
+  it('should say that the link was already saved', async () => {
+    const service = createMockPopupService();
+    await service.save({ url: EXAMPLE_TAB.url, title: EXAMPLE_TAB.title });
+    render(App, { service, onclose: () => {} });
+
+    expect(await screen.findByText('Ya estaba guardado')).toBeTruthy();
+  });
+
+  it('should save the links waiting from the menu once unlocked, then the tab', async () => {
+    const service = createMockPopupService({ pendingLinks: ['https://a.example/'] });
+    const savePending = vi.spyOn(service, 'savePendingLinks');
+    render(App, { service, onclose: () => {} });
 
     expect(await screen.findByText('Guardado')).toBeTruthy();
-    click.mockRestore();
+    expect(savePending).toHaveBeenCalledOnce();
+    await fireEvent.click(screen.getByRole('button', { name: 'Ver mi lista' }));
+    expect(await screen.findByText('a.example')).toBeTruthy();
   });
 
-  it('should go back from creating an account to signing in', async () => {
-    renderPopup({ signedIn: false });
-    await fireEvent.click(await screen.findByRole('button', { name: 'Crear cuenta' }));
+  it('should still save the tab when the waiting links fail', async () => {
+    const service = createMockPopupService();
+    service.savePendingLinks = () => Promise.reject(new Error('down'));
+    render(App, { service, onclose: () => {} });
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Entrar' }));
-
-    expect(screen.getByText('Entra para guardar páginas en tu Stash.')).toBeTruthy();
+    expect(await screen.findByText('Guardado')).toBeTruthy();
   });
 
-  it('should keep Copiar when the clipboard fails', async () => {
-    Object.assign(navigator, { clipboard: { writeText: () => Promise.reject(new Error('no')) } });
-    renderPopup({ signedIn: false });
-    await fireEvent.click(await screen.findByRole('button', { name: 'Crear cuenta' }));
-    await type('Email', 'otra@ejemplo.com');
-    await type('Contraseña', 'una frase bastante larga');
-    await fireEvent.click(screen.getByRole('button', { name: 'Crear cuenta' }));
-    await screen.findByRole('heading', { name: 'Tu código de recuperación' });
+  it('should open the list, read an item and go back', async () => {
+    renderPopup();
+    await screen.findByText('Guardado');
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Copiar' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Ver mi lista' }));
+    expect(await screen.findByRole('heading', { name: 'Pendientes' })).toBeTruthy();
+    await fireEvent.click(screen.getByRole('button', { name: /Cómo organizar la despensa/ }));
 
-    expect(screen.queryByRole('button', { name: 'Copiado' })).toBeNull();
+    expect(await screen.findByText('Texto de ejemplo del artículo.')).toBeTruthy();
+    expect(screen.getAllByRole('link', { name: /Abrir original/ })[0]?.getAttribute('href')).toBe(
+      EXAMPLE_TAB.url,
+    );
+    await fireEvent.click(screen.getByRole('button', { name: 'Volver' }));
+    expect(await screen.findByRole('heading', { name: 'Pendientes' })).toBeTruthy();
+    await fireEvent.click(screen.getByRole('button', { name: 'Volver' }));
+    expect(await screen.findByText('Guardado')).toBeTruthy();
+  });
+
+  it('should say when there is nothing pending', async () => {
+    renderPopup({ tab: { url: 'chrome://extensions', title: 'Extensiones' } });
+
+    await fireEvent.click(await screen.findByRole('button', { name: 'Ver mi lista' }));
+
+    expect(await screen.findByText('No tienes nada pendiente')).toBeTruthy();
+  });
+
+  it('should offer to retry when the list does not load', async () => {
+    const service = createMockPopupService({ tab: null });
+    const list = service.listItems;
+    service.listItems = () => Promise.reject(new Error('down'));
+    render(App, { service, onclose: () => {} });
+    await fireEvent.click(await screen.findByRole('button', { name: 'Ver mi lista' }));
+    expect(await screen.findByText('No se ha podido cargar la lista')).toBeTruthy();
+
+    service.listItems = list;
+    await fireEvent.click(screen.getByRole('button', { name: 'Reintentar' }));
+
+    expect(await screen.findByText('No tienes nada pendiente')).toBeTruthy();
+  });
+
+  it('should say when an item is gone, and when it fails to load', async () => {
+    const service = createMockPopupService();
+    await service.save({ url: 'https://a.example/', title: 'A' });
+    service.getItem = () => Promise.resolve(null);
+    render(App, { service, onclose: () => {} });
+    await fireEvent.click(await screen.findByRole('button', { name: 'Ver mi lista' }));
+    await fireEvent.click(await screen.findByRole('button', { name: /a\.example/ }));
+    expect(await screen.findByText('Este guardado ya no está')).toBeTruthy();
+
+    service.getItem = () => Promise.reject(new Error('down'));
+    await fireEvent.click(screen.getByRole('button', { name: 'Volver' }));
+    await fireEvent.click(await screen.findByRole('button', { name: /a\.example/ }));
+    expect(await screen.findByText('Este guardado ya no está')).toBeTruthy();
+  });
+
+  it('should show a preview when the page could not be read', async () => {
+    const service = createMockPopupService();
+    await service.save({ url: 'https://a.example/', title: 'A' });
+    const item = await service.getItem('item-1');
+    service.getItem = () =>
+      Promise.resolve(
+        item && { ...item, content: { kind: 'preview', description: 'Solo la vista previa' } },
+      );
+    render(App, { service, onclose: () => {} });
+    await fireEvent.click(await screen.findByRole('button', { name: 'Ver mi lista' }));
+    await fireEvent.click(await screen.findByRole('button', { name: /a\.example/ }));
+
+    expect(await screen.findByText('Solo la vista previa')).toBeTruthy();
+  });
+});
+
+describe('Popup log out', () => {
+  it('should log out and go back to the login', async () => {
+    const { service } = renderPopup();
+    await screen.findByText('Guardado');
+    const logout = vi.spyOn(service, 'logout');
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Cerrar sesión' }));
+
+    expect(await screen.findByText('Entra para guardar páginas en tu Stash.')).toBeTruthy();
+    expect(logout).toHaveBeenCalledOnce();
+  });
+
+  it('should go to the login even when closing the session fails', async () => {
+    const service = createMockPopupService();
+    service.logout = () => Promise.reject(new Error('gone'));
+    render(App, { service, onclose: () => {} });
+    await screen.findByText('Guardado');
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Cerrar sesión' }));
+
+    expect(await screen.findByText('Entra para guardar páginas en tu Stash.')).toBeTruthy();
   });
 });
