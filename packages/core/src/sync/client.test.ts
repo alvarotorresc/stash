@@ -208,6 +208,39 @@ describe('createSyncClient', () => {
       });
     });
 
+    it('should match the same X post shared from another host with share parameters', async () => {
+      const { client } = await setUp();
+      const first = await client.saveLink({ url: 'https://x.com/ana/status/1' });
+
+      const again = await client.saveLink({ url: 'https://twitter.com/ana/status/1?s=20&t=Ab_c' });
+
+      expect({
+        id: again.id,
+        alreadySaved: again.alreadySaved,
+        listed: client.listItems().length,
+      }).toEqual({ id: first.id, alreadySaved: true, listed: 1 });
+    });
+
+    it('should match the canonical link a read gave to a short link', async () => {
+      const { client } = await setUp();
+      const first = await client.saveLink({ url: 'https://vm.tiktok.com/ZMabc/' });
+      await client.setReadResult(first.id, {
+        preview,
+        content: null,
+        canonicalUrl: 'https://www.tiktok.com/@ana/video/7',
+      });
+
+      const again = await client.saveLink({
+        url: 'https://www.tiktok.com/@ana/video/7?_r=1&_t=ZN-x&is_from_webapp=1',
+      });
+
+      expect({
+        id: again.id,
+        alreadySaved: again.alreadySaved,
+        listed: client.listItems().length,
+      }).toEqual({ id: first.id, alreadySaved: true, listed: 1 });
+    });
+
     it('should save a different link as new', async () => {
       const { client } = await setUp();
       await client.saveLink({ url: URL_A });
@@ -473,6 +506,17 @@ describe('createSyncClient', () => {
       });
 
       expect(client.search({ query: 'words' }).map(({ item }) => item.id)).toEqual([saved.id]);
+    });
+
+    it('should keep the canonical link of an earlier read when a new one does not give it', async () => {
+      const { client } = await setUp();
+      const saved = await client.saveLink({ url: 'https://vm.tiktok.com/ZMabc/' });
+      const canonicalUrl = 'https://www.tiktok.com/@ana/video/7';
+      await client.setReadResult(saved.id, { preview, content: null, canonicalUrl });
+
+      await client.setReadResult(saved.id, { preview, content: null });
+
+      expect(client.getItem(saved.id)?.canonicalUrl).toBe(canonicalUrl);
     });
 
     it('should fail with NOT_FOUND for an unknown item', async () => {
