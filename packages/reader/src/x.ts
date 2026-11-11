@@ -123,6 +123,44 @@ function postImage(imageUrl: string | null): string | null {
   return imageUrl && !new URL(imageUrl).pathname.includes('/profile_images/') ? imageUrl : null;
 }
 
+/** A web address; t.co shortens every link in a post, so a link-only post is only these. */
+const URL_TEXT = /https?:\/\/\S+/gi;
+
+const HAS_LINK = /https?:\/\//i;
+
+/** Fewer letters and digits than this, once links are removed, is "no text". */
+const MIN_TEXT = 3;
+
+/** True when the text has something to read besides links. */
+function hasText(text: string | null | undefined): text is string {
+  return !!text && text.replace(URL_TEXT, '').replace(/[^\p{L}\p{N}]/gu, '').length >= MIN_TEXT;
+}
+
+const CARD_TITLE = /^.+? on X:\s*["“”«](.+?)["“”»]?\s*(?:\/\s*X)?$/su;
+
+/**
+ * The title of the article or card a post links to. X puts it in the title of the page as
+ * `Name on X: "Title" / X`; the prefix, the quotes and the suffix are not part of it. A page that
+ * only says "Name (@handle) on X" has none.
+ */
+function cardTitle(doc: Document | undefined): string | null {
+  if (!doc) return null;
+  const candidates = [
+    doc.querySelector('meta[property="og:title" i]')?.getAttribute('content'),
+    doc.querySelector('meta[name="twitter:title" i]')?.getAttribute('content'),
+    doc.querySelector('title')?.textContent,
+  ];
+  for (const candidate of candidates) {
+    const title = cleanText(candidate?.match(CARD_TITLE)?.[1]);
+    if (hasText(title)) return title;
+  }
+  return null;
+}
+
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 const EMPTY_META: PageMeta = {
   title: null,
   description: null,
@@ -174,14 +212,37 @@ export function parseXOembed(oembed: unknown, url: string, pageHtml?: string): R
     const handle = handleFrom(data?.authorUrl ?? null);
     const fallbackTitle = author ? `${author}${handle ? ` (${handle})` : ''} on X` : null;
 
+    // A post that is only a link (an article of X, another site) has no text of its own: the
+    // title of its card names it, and it is the body instead of the shortened link.
+    let title = cleanText(content.text, MAX_TITLE) ?? meta.title ?? fallbackTitle;
+    let description = meta.description ?? excerpt(content.text);
+    if (HAS_LINK.test(content.text) && !hasText(content.text)) {
+      const card = cardTitle(page?.doc) ?? (hasText(meta.description) ? meta.description : null);
+      const details =
+        hasText(meta.description) && meta.description !== card ? meta.description : null;
+      if (card) {
+        const html = [card, details].flatMap((text) =>
+          text ? [`<p>${escapeHtml(text)}</p>`] : [],
+        );
+        const built = buildContent(sanitizeHtml(html.join(''), href), 'tweet');
+        content = built.content;
+        built.issues.forEach((issue) => issues.add(issue));
+      }
+      title =
+        cleanText(card, MAX_TITLE) ??
+        (meta.title && !HAS_LINK.test(meta.title) ? meta.title : null) ??
+        fallbackTitle;
+      description = details ?? (hasText(description) ? description : null);
+    }
+
     return {
       source,
       url: href,
       canonicalUrl: oembedCanonical(data?.url, href) ?? sameSiteCanonical(meta.canonicalUrl, href),
       // The title of the page is always "Name (@handle) on X": the text identifies the post, and
       // the origin line already shows the account.
-      title: cleanText(content.text, MAX_TITLE) ?? meta.title ?? fallbackTitle,
-      description: meta.description ?? excerpt(content.text),
+      title,
+      description,
       author: author ?? meta.author,
       siteName: meta.siteName ?? 'X',
       imageUrl: postImage(meta.imageUrl),
