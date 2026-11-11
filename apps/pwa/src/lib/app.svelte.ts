@@ -39,6 +39,9 @@ export class AppState {
   loading = $state(true);
   loadFailed = $state(false);
 
+  /** The tab chosen on Home; kept while the app is open, not saved. */
+  homeTab = $state<Status>('pending');
+
   sheet = $state<SheetState | null>(null);
   toast = $state<UndoToastData | null>(null);
   /** Shown once after creating an account, before anything else. */
@@ -167,6 +170,11 @@ export class AppState {
   /** Marks it read; returns false when it could not (the failure says why). */
   markRead(id: string): Promise<boolean> {
     return this.#setStatus(id, 'read', 'Marcado como leído');
+  }
+
+  /** Back to pending, from read or discarded. */
+  restore(id: string): Promise<boolean> {
+    return this.#setStatus(id, 'pending', 'Vuelto a pendientes');
   }
 
   discard(id: string): Promise<boolean> {
